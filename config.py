@@ -16,9 +16,6 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # Local directory of CypherCat API
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Local directory containing entire repo
-REPO_DIR = os.path.split(ROOT_DIR)[0]
-
 # Local directory for datas
-DATASETS_DIR = os.path.join(REPO_DIR, 'datas')
+DATASETS_DIR = os.path.join(ROOT_DIR, 'datas')
 
