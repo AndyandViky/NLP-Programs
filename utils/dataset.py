@@ -16,7 +16,7 @@ try:
     from torchtext.vocab import Vectors
     from torch.utils.data import Dataset, DataLoader
 
-    from config import DATASETS_DIR
+    from utils.config import DATASETS_DIR
 
 except ImportError as e:
     print(e)
@@ -53,7 +53,7 @@ class TranslationData(Dataset):
         c_data = []
         input_characters = set()
         target_characters = set()
-        for line in data:
+        for line in data[: min(5000, len(data) - 1)]:
             input_text, target_text, _ = line.split('\t')
             target_text = '\t' + target_text + '\n'
             e_data.append(input_text)

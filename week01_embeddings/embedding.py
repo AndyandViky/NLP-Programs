@@ -10,7 +10,7 @@
 """
 try:
     import numpy as np
-    from config import DATASETS_DIR
+    from utils.config import DATASETS_DIR
 
     import gensim.downloader as api
     import matplotlib.pyplot as plt

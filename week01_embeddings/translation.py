@@ -18,13 +18,21 @@ try:
     from torch.nn import LSTM
     from torch import optim
 
-    from config import DATASETS_DIR, DEVICE
-    from dataset import get_dataloader
+    from utils.config import DATASETS_DIR, DEVICE
+    from utils.dataset import get_dataloader
 
 except ImportError as e:
     print(e)
     raise ImportError
 
+
+def caculate_accuracy(pred, target):
+
+    correct = 0
+    correct += (pred == target).sum()
+
+    acc = correct.numpy() / len(pred.numpy())
+    return acc
 
 '''
 model
@@ -104,6 +112,7 @@ if __name__ == '__main__':
         total_loss = 0
         for i, (e_input, d_input, d_target) in enumerate(dataloader):
 
+            e_input, d_input, d_target = e_input.to(DEVICE), d_input.to(DEVICE), d_target.to(DEVICE)
             translator.train()
             translator.zero_grad()
             optimization.zero_grad()
@@ -111,11 +120,24 @@ if __name__ == '__main__':
             state = translator.encoder(e_input)
             d_output = translator.decoder(d_input, state)
 
-            loss = xe_loss(d_output, torch.argmax(d_target, dim=1))
+            d = torch.argmax(d_target, dim=2).detach().cpu().numpy()
+            loss = xe_loss(d_output.view((-1, d_output.size(2))), torch.argmax(d_target, dim=2).view(-1))
             loss.backward()
 
             optimization.step()
 
             total_loss += loss.item()
-        print('loss: {}'.format(total_loss / len(dataloader)))
+
+        translator.eval()
+        with torch.no_grad():
+            (t_e_input, t_d_input, t_d_target) = next(iter(dataloader))
+            t_e_input, t_d_input, t_d_target = t_e_input.to(DEVICE), t_d_input.to(DEVICE), t_d_target
+
+            state = translator.encoder(t_e_input)
+            d_output = translator.decoder(t_d_input, state)
+
+            pred = torch.argmax(d_output, dim=2).view((-1)).detach().cpu()
+            target = torch.argmax(t_d_target, dim=2).view(-1).detach().cpu()
+            acc = caculate_accuracy(pred, target)
+            print('loss: {}, acc: {}'.format(total_loss / len(dataloader), acc))
 
