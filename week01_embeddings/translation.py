@@ -46,6 +46,7 @@ class Encoder(nn.Module):
                 input_size=input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
+                batch_first=True,
             )
 
     def forward(self, x):
@@ -63,6 +64,7 @@ class Decoder(nn.Module):
                 input_size=input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
+                batch_first=True,
             )
         self.linear = nn.Linear(hidden_size, input_size)
 
@@ -89,8 +91,8 @@ if __name__ == '__main__':
     b1 = 0.5
     b2 = 0.99
     weight_decay = 2.5 * 1e-5
-    epoch = 100
-    batch_size = 128
+    epoch = 500
+    batch_size = 64
     data_name = 'cmn'
     hidden_size = 256
     num_layers = 1
@@ -117,10 +119,16 @@ if __name__ == '__main__':
             translator.zero_grad()
             optimization.zero_grad()
 
+            states_h = None
+            states_c = None
             state = translator.encoder(e_input)
             d_output = translator.decoder(d_input, state)
 
-            d = torch.argmax(d_target, dim=2).detach().cpu().numpy()
+            d1 = d_output.detach().cpu().numpy()
+            d2 = d_target.detach().cpu().numpy()
+            d3 = torch.argmax(d_target, dim=2).view(-1).detach().cpu().numpy()
+            d4 = d_output.view((-1, d_output.size(2))).detach().cpu().numpy()
+
             loss = xe_loss(d_output.view((-1, d_output.size(2))), torch.argmax(d_target, dim=2).view(-1))
             loss.backward()
 

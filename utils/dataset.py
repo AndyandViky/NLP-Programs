@@ -53,7 +53,7 @@ class TranslationData(Dataset):
         c_data = []
         input_characters = set()
         target_characters = set()
-        for line in data[: min(5000, len(data) - 1)]:
+        for line in data[: min(1000, len(data) - 1)]:
             input_text, target_text, _ = line.split('\t')
             target_text = '\t' + target_text + '\n'
             e_data.append(input_text)
@@ -80,15 +80,14 @@ class TranslationData(Dataset):
             [(char, i) for i, char in enumerate(target_characters)]
         )
 
-        l = max(max_seq_encoder_len, max_seq_decoder_len)
         encoder_input_data = np.zeros(
-            (len(c_data), l, num_encoder_tokens),
+            (len(c_data), max_seq_encoder_len, num_encoder_tokens),
             dtype='float32')
         decoder_input_data = np.zeros(
-            (len(c_data), l, num_decoder_tokens),
+            (len(c_data), max_seq_decoder_len, num_decoder_tokens),
             dtype='float32')
         decoder_target_data = np.zeros(
-            (len(c_data), l, num_decoder_tokens),
+            (len(c_data), max_seq_decoder_len, num_decoder_tokens),
             dtype='float32')
 
         for i, (input_text, target_text) in enumerate(zip(e_data, c_data)):
