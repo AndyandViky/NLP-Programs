@@ -62,23 +62,23 @@ class Encoder(nn.Module):
         embedded = self.dropout(self.embedding(x))
         out_put, hidden = self.rnn(embedded)
 
-        hidden = torch.tanh(self.fc(torch.cat(hidden[-2, :, :], hidden[-1, :, :], dim=1)))
+        hidden = torch.tanh(self.fc(torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)))
 
         return out_put, hidden
 
 
 class Decoder(nn.Module):
 
-    def __init__(self, dec_input: int, emb_dim: int, enc_hid_dim: int, dec_hid_dim: int,
+    def __init__(self, dec_input_dim: int, emb_dim: int, enc_hid_dim: int, dec_hid_dim: int,
                  dropout: int, attention: nn.Module, verbose: int = 0):
         super(Decoder, self).__init__()
 
-        self.dec_input = dec_input
+        self.dec_input_dim = dec_input_dim
         self.attention = attention
 
-        self.embedding = nn.Embedding(dec_input, emb_dim)
+        self.embedding = nn.Embedding(dec_input_dim, emb_dim)
         self.rnn = nn.GRU((enc_hid_dim * 2) + emb_dim, dec_hid_dim)
-        self.out = nn.Linear(self.attention.attn_in + emb_dim, dec_input)
+        self.out = nn.Linear(self.attention.attn_in + emb_dim, dec_input_dim)
         self.dropout = nn.Dropout(dropout)
         self.verbose = verbose
 
@@ -109,11 +109,11 @@ class Decoder(nn.Module):
         output = output.squeeze(0)
         weighted_encoder_rep = weighted_encoder_rep.squeeze(0)
 
-        output = torch.cat((
+        output = self.out(torch.cat((
             output,
             weighted_encoder_rep,
             embedded
-        ), dim=1)
+        ), dim=1))
 
         return output, hidden.squeeze(0)
 
@@ -158,17 +158,15 @@ class Seq2Seq(nn.Module):
 
         max_len = trg.shape[0]
         encoder_output, hidden = self.encoder(src)
+        outputs = torch.zeros((max_len, trg.shape[1], self.decoder.dec_input_dim))
 
-        outputs = []
         output = trg[0, :]
         for i in range(max_len):
             output, hidden = self.decoder(output, hidden, encoder_output)
-            outputs.append(output)
+            outputs[i] = output
             teacher_force = random.random() < teacher_forcint_ratio
-            top1 = output.max(1)[0]
+            top1 = output.max(1)[1]
             output = trg[i] if teacher_force else top1
-
-        outputs = torch.tensor(outputs, device=DEVICE)
 
         return outputs
 
@@ -212,7 +210,50 @@ def count_parameters(model: nn.Module):
 
 print(f'The model has {count_parameters(model):,} trainable parameters')
 
+PAD_INDEX = TRG.vocab.stoi['<pad>']
+criterion = nn.CrossEntropyLoss(ignore_index=PAD_INDEX).to(DEVICE)
 
+for epoch in range(100):
+
+    # training
+    model.train()
+    total_loss = 0
+    for index, batch in enumerate(train_iterator):
+
+        src = batch.src.to(DEVICE)
+        trg = batch.trg.to(DEVICE)
+
+        model.zero_grad()
+        optimizer.zero_grad()
+
+        output = model(src, trg)
+
+        output = output[1:].view(-1, output.shape[-1])
+        trg = trg[1:].view(-1)
+
+        loss = criterion(output, trg)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), 1)
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    # evaluation
+    model.eval()
+    e_total_loss = 0
+    for index, batch in enumerate(valid_iterator):
+
+        src = batch.src.to(DEVICE)
+        trg = batch.trg.to(DEVICE)
+
+        output = model(src, trg, 0)
+        output = output[1:].view(-1, output.shape[-1])
+        trg = trg[1:].view(-1)
+
+        loss = criterion(output, trg)
+        e_total_loss += loss.item()
+
+    print('train_loss: {}, valid_loss: {}'.format(total_loss / len(train_iterator), e_total_loss / len(valid_iterator)))
 
 
 
