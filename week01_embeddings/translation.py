@@ -9,13 +9,14 @@
 @Desc: translation.py
 """
 try:
+    import random
     import torch.nn as nn
     import torch
     import torchtext as tx
 
     from gensim.models import Word2Vec
     from nltk.tokenize import WordPunctTokenizer
-    from torch.nn import LSTM
+    from torch.nn import LSTM, GRU
     from torch import optim
 
     from utils.config import DATASETS_DIR, DEVICE
@@ -42,7 +43,7 @@ class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
         super(Encoder, self).__init__()
 
-        self.model = LSTM(
+        self.model = GRU(
                 input_size=input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
@@ -60,7 +61,7 @@ class Decoder(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
         super(Decoder, self).__init__()
 
-        self.lstm = LSTM(
+        self.lstm = GRU(
                 input_size=input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
@@ -70,9 +71,9 @@ class Decoder(nn.Module):
 
     def forward(self, x, states):
 
-        output, _ = self.lstm(x, states)
+        output, hidden = self.lstm(x, states)
         output = torch.softmax(self.linear(output), dim=2)
-        return output
+        return output, hidden
 
 
 class Translator(nn.Module):
@@ -92,9 +93,9 @@ if __name__ == '__main__':
     b2 = 0.99
     weight_decay = 2.5 * 1e-5
     epoch = 500
-    batch_size = 64
+    batch_size = 128
     data_name = 'cmn'
-    hidden_size = 256
+    hidden_size = 64
     num_layers = 1
 
     # get dataloader
@@ -119,10 +120,18 @@ if __name__ == '__main__':
             translator.zero_grad()
             optimization.zero_grad()
 
-            states_h = None
-            states_c = None
             state = translator.encoder(e_input)
-            d_output = translator.decoder(d_input, state)
+            d_output, _ = translator.decoder(d_input, state)
+            # d_output = None
+            # input = d_input[:, 0:1, :]
+            # for i in range(d_target.shape[1]):
+            #     output, state = translator.decoder(input, state)
+            #     if d_output is None:
+            #         d_output = output
+            #     else:
+            #         d_output = torch.cat((d_output, output), dim=1)
+            #     teacher_forcing = random.random() < 0.7
+            #     input = d_input[:, i:i+1] if teacher_forcing else output
 
             d1 = d_output.detach().cpu().numpy()
             d2 = d_target.detach().cpu().numpy()
@@ -131,7 +140,7 @@ if __name__ == '__main__':
 
             loss = xe_loss(d_output.view((-1, d_output.size(2))), torch.argmax(d_target, dim=2).view(-1))
             loss.backward()
-
+            nn.utils.clip_grad_norm_(translator.parameters(), 1)
             optimization.step()
 
             total_loss += loss.item()
@@ -142,7 +151,7 @@ if __name__ == '__main__':
             t_e_input, t_d_input, t_d_target = t_e_input.to(DEVICE), t_d_input.to(DEVICE), t_d_target
 
             state = translator.encoder(t_e_input)
-            d_output = translator.decoder(t_d_input, state)
+            d_output, _ = translator.decoder(t_d_input, state)
 
             pred = torch.argmax(d_output, dim=2).view((-1)).detach().cpu()
             target = torch.argmax(t_d_target, dim=2).view(-1).detach().cpu()

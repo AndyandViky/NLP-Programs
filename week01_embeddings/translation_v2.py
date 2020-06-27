@@ -208,14 +208,13 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 PAD_INDEX = TRG.vocab.stoi['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=PAD_INDEX).to(DEVICE)
 
-for epoch in range(2):
+for epoch in range(100):
 
     # training
     model.train()
     total_loss = 0
     for index, batch in enumerate(train_iterator):
 
-        if index == 2: break
         src = batch.src.to(DEVICE)
         trg = batch.trg.to(DEVICE)
 
@@ -240,7 +239,6 @@ for epoch in range(2):
         e_total_loss = 0
         for index, batch in enumerate(valid_iterator):
 
-            if index == 2: break
             src = batch.src.to(DEVICE)
             trg = batch.trg.to(DEVICE)
 
