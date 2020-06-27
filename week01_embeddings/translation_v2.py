@@ -49,7 +49,6 @@ class Encoder(nn.Module):
         self.emb_dim = emb_dim
         self.enc_hid_dim = enc_hid_dim
         self.dec_hid_dim = dec_hid_dim
-        self.dropout = dropout
 
         self.embedding = nn.Embedding(input_dim, emb_dim)
         self.rnn = nn.GRU(input_size=emb_dim, hidden_size=enc_hid_dim, bidirectional=True)
@@ -105,15 +104,11 @@ class Decoder(nn.Module):
         rnn_input = torch.cat((embedded, weighted_encoder_rep), dim=2)
         output, hidden = self.rnn(rnn_input, decoder_hidden.unsqueeze(0))
 
-        embedded = embedded.squeeze(0)
-        output = output.squeeze(0)
-        weighted_encoder_rep = weighted_encoder_rep.squeeze(0)
-
         output = self.out(torch.cat((
             output,
             weighted_encoder_rep,
             embedded
-        ), dim=1))
+        ), dim=2).squeeze(0))
 
         return output, hidden.squeeze(0)
 
@@ -213,13 +208,14 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 PAD_INDEX = TRG.vocab.stoi['<pad>']
 criterion = nn.CrossEntropyLoss(ignore_index=PAD_INDEX).to(DEVICE)
 
-for epoch in range(100):
+for epoch in range(2):
 
     # training
     model.train()
     total_loss = 0
     for index, batch in enumerate(train_iterator):
 
+        if index == 2: break
         src = batch.src.to(DEVICE)
         trg = batch.trg.to(DEVICE)
 
@@ -240,20 +236,43 @@ for epoch in range(100):
 
     # evaluation
     model.eval()
-    e_total_loss = 0
-    for index, batch in enumerate(valid_iterator):
+    with torch.no_grad():
+        e_total_loss = 0
+        for index, batch in enumerate(valid_iterator):
 
-        src = batch.src.to(DEVICE)
-        trg = batch.trg.to(DEVICE)
+            if index == 2: break
+            src = batch.src.to(DEVICE)
+            trg = batch.trg.to(DEVICE)
 
-        output = model(src, trg, 0)
-        output = output[1:].view(-1, output.shape[-1])
-        trg = trg[1:].view(-1)
+            output = model(src, trg, 0)
+            output = output[1:].view(-1, output.shape[-1])
+            trg = trg[1:].view(-1)
 
-        loss = criterion(output, trg)
-        e_total_loss += loss.item()
+            loss = criterion(output, trg)
+            e_total_loss += loss.item()
 
     print('train_loss: {}, valid_loss: {}'.format(total_loss / len(train_iterator), e_total_loss / len(valid_iterator)))
+
+# testing
+model.eval()
+with torch.no_grad():
+
+    test_data = next(iter(test_iterator))
+    t_src, t_trg = test_data.src, test_data.trg
+
+    encoder_output, hidden = model.encoder(t_src)
+    output = t_trg[0]
+    words = []
+    while True:
+        output, hidden = model.decoder(output, hidden, encoder_output)
+        topv, topi = output.data.topk(1)
+        if topi == 1:
+            words.append('<EOS>')
+        else:
+            pass
+        output = topi.squeeze()
+
+
 
 
 
