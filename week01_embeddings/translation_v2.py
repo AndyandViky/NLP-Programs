@@ -8,17 +8,24 @@
 @Time: 2020/6/24 下午7:59
 @Desc: translation_v2.py
 """
-import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
+try:
+    import random
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    import torch.nn.functional as F
 
-from typing import Tuple
-from torch import Tensor
-from torchtext.datasets import Multi30k
-from torchtext.data import Field, BucketIterator
-from utils.config import DEVICE
+    from typing import Tuple
+    from torch import Tensor
+    from torchtext.datasets import Multi30k
+    from torchtext.data import Field, BucketIterator
+
+    from utils.config import DEVICE
+    from utils.utils import caculate_accuracy
+
+except ImportError as e:
+    print(e)
+    raise ImportError
 
 
 # ======================= prepare data ======================= #
@@ -231,12 +238,14 @@ for epoch in range(100):
         nn.utils.clip_grad_norm_(model.parameters(), 1)
         optimizer.step()
 
+        print(loss.item())
         total_loss += loss.item()
 
-    # evaluation
+    # evaluation using accuracy
     model.eval()
     with torch.no_grad():
         e_total_loss = 0
+        e_total_acc = 0
         for index, batch in enumerate(valid_iterator):
 
             src = batch.src.to(DEVICE)
@@ -246,10 +255,16 @@ for epoch in range(100):
             output = output[1:].view(-1, output.shape[-1])
             trg = trg[1:].view(-1)
 
+            pred = torch.argmax(output, dim=1).view((-1)).detach().cpu()
+            target = trg.detach().cpu()
+            e_total_acc += caculate_accuracy(pred, target)
+
             loss = criterion(output, trg)
             e_total_loss += loss.item()
 
-    print('train_loss: {}, valid_loss: {}'.format(total_loss / len(train_iterator), e_total_loss / len(valid_iterator)))
+    print('train_loss: {}, valid_loss: {}, acc: {}'.format(total_loss / len(train_iterator),
+                                                           e_total_loss / len(valid_iterator),
+                                                           e_total_acc / len(valid_iterator)))
 
 # testing
 model.eval()

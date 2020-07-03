@@ -21,19 +21,11 @@ try:
 
     from utils.config import DATASETS_DIR, DEVICE
     from utils.dataset import get_dataloader
+    from utils.utils import caculate_accuracy
 
 except ImportError as e:
     print(e)
     raise ImportError
-
-
-def caculate_accuracy(pred, target):
-
-    correct = 0
-    correct += (pred == target).sum()
-
-    acc = correct.numpy() / len(pred.numpy())
-    return acc
 
 '''
 model
