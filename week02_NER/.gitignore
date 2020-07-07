@@ -4,3 +4,5 @@ datas/
 __pycache__/
 pretrained_model/
 BERT-NER-Pytorch/
+model.pkl
+result.csv

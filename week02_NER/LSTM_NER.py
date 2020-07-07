@@ -14,6 +14,7 @@ import numpy as np
 import string
 import torch
 import torch.nn as nn
+import pandas as pd
 
 from torch.nn import LSTM
 from torch import Tensor
@@ -107,6 +108,8 @@ test_char_ids = [get_char_id(seqence) for seqence in test_seqs]
 UNK_INDEX = vocab['UNK'].index
 train_char_ids = [item + [UNK_INDEX for i in range(max_seq_len - len(item))] for item in train_char_ids]
 train_char_ids = np.array(train_char_ids)
+test_char_ids = [item + [UNK_INDEX for i in range(max_seq_len - len(item))] for item in test_char_ids]
+test_char_ids = np.array(test_char_ids)
 
 train_char_labels = [item + ['UNK' for i in range(max_seq_len - len(item))] for item in train_char_labels]
 category = np.unique(np.array(sum(train_char_labels, [])))
@@ -117,6 +120,9 @@ train_char_labels = np.array(train_char_labels)
 for c in category:
     train_char_labels[train_char_labels == c] = category_dict[c]
 train_char_labels = train_char_labels.astype(np.int)
+
+VALID_PART = 1 / 9
+valid_seqs = train_seqs[int(len(train_seqs) * (1 - VALID_PART)):]
 
 
 class AnswerData(Dataset):
@@ -145,17 +151,23 @@ class AnswerData(Dataset):
 
     def __getitem__(self, item: int) -> Tuple:
 
-        data, label = self.datas[item], self.labels[item]
-        data = self.transform(data)
+        if self.labels is not None:
+            data, label = self.datas[item], self.labels[item]
+            data = self.transform(data)
 
-        return data, torch.tensor(label)
+            return data, torch.tensor(label)
+        else:
+            data = self.datas[item]
+            data = self.transform(data)
+
+            return data
 
     def __len__(self) -> int:
         return len(self.datas)
 
     def preprocess(self, data_type: int = 0) -> Tuple:
 
-        train_index = int(len(train_seqs) * (9 / 10))
+        train_index = int(len(train_seqs) * (1 - VALID_PART))
         if data_type == 0:
             return train_char_ids[:train_index], train_char_labels[:train_index]
         elif data_type == 1:
@@ -166,10 +178,10 @@ class AnswerData(Dataset):
             raise Exception
 
 
-def get_data_loader(root: str, data_type_name: str, split_type: int, batch_size: int) -> DataLoader:
+def get_data_loader(root: str, data_type_name: str, split_type: int, batch_size: int, shuffle: bool = True) -> DataLoader:
 
     dataset = AnswerData(root, transform=lambda x: torch.tensor(x), data_type_name=data_type_name, split_type=split_type)
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size)
+    dataloader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size)
 
     return dataloader
 
@@ -207,6 +219,79 @@ class Model(nn.Module):
         return output
 
 
+def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
+    b_crop = category_dict['B_n_crop']
+    i_crop = category_dict['I_n_crop']
+    b_disease = category_dict['B_n_disease']
+    i_disease = category_dict['I_n_disease']
+    b_medicine = category_dict['B_n_medicine']
+    i_medicine = category_dict['I_n_medicine']
+
+    def get_entity_id(seq_item: list, item: np.ndarray, b_e, i_e):
+        begin = np.where(item == b_e)[0]
+        result = []
+        if len(begin) == 0:
+            return result
+        for index, j in enumerate(begin):
+            seq = ''
+            seq = seq + seq_item[j]
+            if j != len(item) - 1:
+                for k in range(j + 1, len(item)):
+                    if item[k] == i_e:
+                        seq = seq + seq_item[k]
+                    else:
+                        break
+            result.append(seq)
+        return result
+
+    crops = []
+    diseases = []
+    medicines = []
+    for index, item in enumerate(pred):
+        crops.append(get_entity_id(test_seqs[index], item, b_crop, i_crop))
+        diseases.append(get_entity_id(test_seqs[index], item, b_disease, i_disease))
+        medicines.append(get_entity_id(test_seqs[index], item, b_medicine, i_medicine))
+
+    return crops, diseases, medicines
+
+
+def caculate_f_acc(crops: list, diseases: list, medicines: list) -> Tuple:
+
+    precision = 0
+    recall = 0
+    f_scores = 0
+    n = len(crops)
+    train_index = int(len(train_seqs) * (1 - VALID_PART))
+    true_labels = train[train_index:, 1:]
+
+    def calculate_tl_fl(item: list, true_item: list) -> Tuple:
+        true_item = eval(true_item)
+        ttl = 0
+        for j in item:
+            if j in true_item:
+                ttl = ttl + 1
+        return ttl, len(item), len(true_item)
+
+    for i in range(n):
+        ttl, size, t_size = calculate_tl_fl(crops[i], true_labels[i, 0])
+        result = calculate_tl_fl(diseases[i], true_labels[i, 1])
+        ttl = ttl + result[0]
+        size = size + result[1]
+        t_size = t_size + result[2]
+        result = calculate_tl_fl(medicines[i], true_labels[i, 2])
+        ttl = ttl + result[0]
+        size = size + result[1]
+        t_size = t_size + result[2]
+        p = ttl / size if size != 0 else 0
+        r = ttl / t_size if t_size != 0 else 0
+        f1 = (2 * p * r) / (p + r) if (p + r) != 0 else 0
+        f_scores = f_scores + f1
+        precision = precision + p
+        recall = recall + r
+
+    return precision / n, recall / n, f_scores / n
+
+
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 TRAIN = 'TRAIN'
 VALID = 'VALID'
@@ -218,7 +303,7 @@ EM_DIM = 50
 LR = 1e-3
 INPUT_SIZE = max_seq_len
 NUM_LAYERS = 1
-EPOCH = 100
+EPOCH = 200
 
 # init model
 model = Model(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
@@ -228,8 +313,8 @@ optim = torch.optim.Adam(model.parameters(), lr=LR)
 criterion = nn.CrossEntropyLoss().to(DEVICE)
 # get_dataloader
 train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE)
-valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000)
-test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000)
+valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False)
+test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000, shuffle=False)
 
 print('begin training ......')
 for epoch in range(EPOCH):
@@ -256,13 +341,39 @@ for epoch in range(EPOCH):
         data, label = next(iter(valid_dataloader))
         data, label = data.to(DEVICE), label.to(DEVICE)
         output = model(data)
+        pred = torch.argmax(output, 2).data.cpu().numpy()
         valid_loss = criterion(output.view((-1, output.size(2))), label.view(-1))
-        valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1), label.view(-1))
+        valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1).data.cpu(),
+                                      label.view(-1).data.cpu())
+        p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs))
 
-    print('train_loss: {}, valid_loss: {}, acc: {}'.format(train_loss / len(train_dataloader), valid_loss, valid_acc))
+    print('epoch: {}, train_loss: {}, valid_loss: {}, acc: {}, precision: {}, recall: {}, f1: {}'.
+          format(epoch, train_loss / len(train_dataloader), valid_loss, valid_acc, p, r, f))
+
+torch.save(model.state_dict(), './model.pkl')
+model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
+# model.eval()
+# with torch.no_grad():
+#     data, label = next(iter(valid_dataloader))
+#     data, label = data.to(DEVICE), label.to(DEVICE)
+#     output = model(data)
+#     pred = torch.argmax(output, 2).data.cpu().numpy()
+#     valid_loss = criterion(output.view((-1, output.size(2))), label.view(-1))
+#     valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1).data.cpu(),
+#                                   label.view(-1).data.cpu())
+#     valid_f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs))
+#
+# print('valid_loss: {}, acc: {}, f_acc: {}'.format(valid_loss, valid_acc, valid_f_acc))
 
 # testing
 model.eval()
 with torch.no_grad():
-    data, _ = next(iter(test_dataloader))
+    data = next(iter(test_dataloader))
     data = data.to(DEVICE)
+
+    output = model(data)
+    pred = torch.argmax(output, 2).data.cpu().numpy()
+
+    crops, diseases, medicines = drop_entity(pred, test_seqs)
+    pd.DataFrame([test[:, 0], crops, diseases, medicines]).T.\
+        to_csv('./result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
