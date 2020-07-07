@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 
-from torch.nn import LSTM
+from torch.nn import LSTM, GRU
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
@@ -86,9 +86,10 @@ def char_split(sentence: str) -> list:
         s_arr.append(word)
     return s_arr
 # calculate word2vector
+VECTOR_SIZE = 100
 token = [char_split(i) for i in seq_datas]
 token.insert(0, ['UNK'])
-model = Word2Vec(token, window=5, size=50, min_count=0).wv
+model = Word2Vec(token, window=10, size=VECTOR_SIZE, min_count=0).wv
 vocab = model.vocab
 vectors = model.vectors
 max_seq_len = max([len(i) for i in token])
@@ -233,6 +234,8 @@ def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
         if len(begin) == 0:
             return result
         for index, j in enumerate(begin):
+            if j >= len(seq_item):
+                break
             seq = ''
             seq = seq + seq_item[j]
             if j != len(item) - 1:
@@ -299,11 +302,11 @@ TEST = 'TEST'
 HIDDEN_DIM = 64
 OUTPUT_SIZE = len(category)
 BATCH_SIZE = 64
-EM_DIM = 50
-LR = 1e-3
+EM_DIM = VECTOR_SIZE
+LR = 1e-2
 INPUT_SIZE = max_seq_len
 NUM_LAYERS = 1
-EPOCH = 200
+EPOCH = 150
 
 # init model
 model = Model(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
@@ -350,8 +353,8 @@ for epoch in range(EPOCH):
     print('epoch: {}, train_loss: {}, valid_loss: {}, acc: {}, precision: {}, recall: {}, f1: {}'.
           format(epoch, train_loss / len(train_dataloader), valid_loss, valid_acc, p, r, f))
 
-torch.save(model.state_dict(), './model.pkl')
-model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
+# torch.save(model.state_dict(), './model.pkl')
+# model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
 # model.eval()
 # with torch.no_grad():
 #     data, label = next(iter(valid_dataloader))
