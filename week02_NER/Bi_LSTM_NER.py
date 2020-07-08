@@ -16,6 +16,7 @@ import torch.nn as nn
 import pandas as pd
 
 from torch.nn import LSTM
+from itertools import zip_longest
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
@@ -77,21 +78,21 @@ for item in train[:, 0]:
 # combine test data to build vocab
 test_seqs = [re.sub(z_punctuation, '', sentence) for sentence in test[:, 1]]
 seq_datas = train_seqs + test_seqs
-
+max_seq_len = max([len(i) for i in seq_datas]) + 2
 
 def char_split(sentence: str) -> list:
-    s_arr = []
+    s_arr = ['<start>']
     for word in sentence:
         s_arr.append(word)
+    s_arr.append('<end>')
+    s_arr = s_arr + ['<pad>' for i in range(max_seq_len - len(s_arr))]
     return s_arr
 # calculate word2vector
 VECTOR_SIZE = 150
 token = [char_split(i) for i in seq_datas]
-token.insert(0, ['UNK'])
 model = Word2Vec(token, window=10, size=VECTOR_SIZE, min_count=0).wv
 vocab = model.vocab
 vectors = model.vectors
-max_seq_len = max([len(i) for i in token])
 
 
 # calculate char id
@@ -100,18 +101,12 @@ def get_char_id(seqence):
     for char in seqence:
         ids.append(vocab[char].index)
     return ids
-train_char_ids = [get_char_id(seqence) for seqence in train_seqs]
-test_char_ids = [get_char_id(seqence) for seqence in test_seqs]
+train_char_ids = np.array([get_char_id(seqence) for seqence in token[:len(train_seqs)]])
+test_char_ids = np.array([get_char_id(seqence) for seqence in token[len(train_seqs):]])
 
 
-# padding data and labels
-UNK_INDEX = vocab['UNK'].index
-train_char_ids = [item + [UNK_INDEX for i in range(max_seq_len - len(item))] for item in train_char_ids]
-train_char_ids = np.array(train_char_ids)
-test_char_ids = [item + [UNK_INDEX for i in range(max_seq_len - len(item))] for item in test_char_ids]
-test_char_ids = np.array(test_char_ids)
-
-train_char_labels = [item + ['UNK' for i in range(max_seq_len - len(item))] for item in train_char_labels]
+# padding labels
+train_char_labels = [['<start>'] + item + ['<end>'] + ['<pad>' for i in range(max_seq_len - 2 - len(item))] for item in train_char_labels]
 category = np.unique(np.array(sum(train_char_labels, [])))
 category_dict = dict(
     [(c, index) for index, c in enumerate(category)]
@@ -232,6 +227,211 @@ class BiLSTM(nn.Module):
         output = torch.softmax(self.out(output), dim=2)
         return output
 
+    def caculate_loss(self, output: Tensor, target: Tensor, criterion=None) -> Tensor:
+
+        PAD = category_dict['<pad>']
+        assert PAD is not None
+
+        mask = (target != PAD)  # [B, L]
+        targets = target[mask]
+        out_size = output.size(2)
+        logits = output.masked_select(
+            mask.unsqueeze(2).expand(-1, -1, out_size)
+        ).contiguous().view(-1, out_size)
+
+        assert logits.size(0) == targets.size(0)
+
+        return criterion(logits, targets)
+
+    def get_word_id(self, output: Tensor) -> Tensor:
+
+        return torch.argmax(output, 2).data.cpu().numpy()
+
+
+class BiLSTM_CRF(nn.Module):
+
+    def __init__(self, input_dim: int,
+                 hidden_dim: int = 64,
+                 em_dim: int = 50,
+                 output_dim: int = 10,
+                 num_layers: int = 1,
+                 bidirectional: bool = True,
+                 pre_model: Tensor = None):
+        super(BiLSTM_CRF, self).__init__()
+
+        self.bidirectional = bidirectional
+        self.output_dim = output_dim
+        if pre_model is not None:
+            self.embedding = nn.Embedding.from_pretrained(pre_model)
+        else:
+            self.embedding = nn.Embedding(input_dim, em_dim)
+        self.rnn = LSTM(
+            input_size=em_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            bidirectional=bidirectional,
+            batch_first=True,
+        )
+        self.out = nn.Linear(hidden_dim * 2, output_dim)
+        self.transition = nn.Parameter(
+            torch.ones(output_dim, output_dim) * 1 / output_dim)
+
+    def forward(self, x: Tensor) -> Tensor:
+
+        embeded = self.embedding(x)
+        output, hidden = self.rnn(embeded)
+        output = self.out(output)
+        crf_scores = output.unsqueeze(
+            2).expand(-1, -1, self.output_dim, -1) + self.transition.unsqueeze(0)
+
+        return crf_scores
+
+    def indexed(self, targets: Tensor, tagset_size: int, start_id: int) -> Tensor:
+        """将targets中的数转化为在[T*T]大小序列中的索引,T是标注的种类"""
+        batch_size, max_len = targets.size()
+        for col in range(max_len - 1, 0, -1):
+            targets[:, col] += (targets[:, col - 1] * tagset_size)
+        targets[:, 0] += (start_id * tagset_size)
+        return targets
+
+    def caculate_loss(self, output: Tensor, target: Tensor, criterion=None) -> Tensor:
+
+        pad_id = category_dict['<pad>']
+        start_id = category_dict['<start>']
+        end_id = category_dict['<end>']
+
+        device = output.device
+
+        # targets:[B, L] crf_scores:[B, L, T, T]
+        batch_size, max_len = target.size()
+        target_size = len(category_dict)
+
+        # mask = 1 - ((targets == pad_id) + (targets == end_id))  # [B, L]
+        mask = (target != pad_id)
+        lengths = mask.sum(dim=1)
+        targets = self.indexed(target, target_size, start_id)
+
+        # # 计算Golden scores方法１
+        # import pdb
+        # pdb.set_trace()
+        targets = targets.masked_select(mask)  # [real_L]
+
+        flatten_scores = output.masked_select(
+            mask.view(batch_size, max_len, 1, 1).expand_as(output)
+        ).view(-1, target_size * target_size).contiguous()
+
+        golden_scores = flatten_scores.gather(
+            dim=1, index=targets.unsqueeze(1)).sum()
+
+        # 计算golden_scores方法２：利用pack_padded_sequence函数
+        # targets[targets == end_id] = pad_id
+        # scores_at_targets = torch.gather(
+        #     crf_scores.view(batch_size, max_len, -1), 2, targets.unsqueeze(2)).squeeze(2)
+        # scores_at_targets, _ = pack_padded_sequence(
+        #     scores_at_targets, lengths-1, batch_first=True
+        # )
+        # golden_scores = scores_at_targets.sum()
+
+        # 计算all path scores
+        # scores_upto_t[i, j]表示第i个句子的第t个词被标注为j标记的所有t时刻事前的所有子路径的分数之和
+        scores_upto_t = torch.zeros(batch_size, target_size).to(device)
+        for t in range(max_len):
+            # 当前时刻 有效的batch_size（因为有些序列比较短)
+            batch_size_t = (lengths > t).sum().item()
+            if t == 0:
+                scores_upto_t[:batch_size_t] = output[:batch_size_t,
+                                               t, start_id, :]
+            else:
+                # We add scores at current timestep to scores accumulated up to previous
+                # timestep, and log-sum-exp Remember, the cur_tag of the previous
+                # timestep is the prev_tag of this timestep
+                # So, broadcast prev. timestep's cur_tag scores
+                # along cur. timestep's cur_tag dimension
+                scores_upto_t[:batch_size_t] = torch.logsumexp(
+                    output[:batch_size_t, t, :, :] +
+                    scores_upto_t[:batch_size_t].unsqueeze(2),
+                    dim=1
+                )
+        all_path_scores = scores_upto_t[:, end_id].sum()
+
+        # 训练大约两个epoch loss变成负数，从数学的角度上来说，loss = -logP
+        loss = (all_path_scores - golden_scores) / batch_size
+        return loss
+
+    def get_word_id(self, ouput: Tensor) -> Tensor:
+
+        """使用维特比算法进行解码"""
+        start_id = category_dict['<start>']
+        end_id = category_dict['<end>']
+        pad = category_dict['<pad>']
+        tagset_size = len(category_dict)
+
+        device = ouput.device
+        # B:batch_size, L:max_len, T:target set size
+        B, L, T, _ = ouput.size()
+        # viterbi[i, j, k]表示第i个句子，第j个字对应第k个标记的最大分数
+        viterbi = torch.zeros(B, L, T).to(device)
+        # backpointer[i, j, k]表示第i个句子，第j个字对应第k个标记时前一个标记的id，用于回溯
+        backpointer = (torch.zeros(B, L, T).long() * end_id).to(device)
+        lengths = torch.LongTensor(lengths).to(device)
+        # 向前递推
+        for step in range(L):
+            batch_size_t = (lengths > step).sum().item()
+            if step == 0:
+                # 第一个字它的前一个标记只能是start_id
+                viterbi[:batch_size_t, step,
+                :] = ouput[: batch_size_t, step, start_id, :]
+                backpointer[: batch_size_t, step, :] = start_id
+            else:
+                max_scores, prev_tags = torch.max(
+                    viterbi[:batch_size_t, step - 1, :].unsqueeze(2) +
+                    ouput[:batch_size_t, step, :, :],  # [B, T, T]
+                    dim=1
+                )
+                viterbi[:batch_size_t, step, :] = max_scores
+                backpointer[:batch_size_t, step, :] = prev_tags
+
+        # 在回溯的时候我们只需要用到backpointer矩阵
+        backpointer = backpointer.view(B, -1)  # [B, L * T]
+        tagids = []  # 存放结果
+        tags_t = None
+        for step in range(L - 1, 0, -1):
+            batch_size_t = (lengths > step).sum().item()
+            if step == L - 1:
+                index = torch.ones(batch_size_t).long() * (step * tagset_size)
+                index = index.to(device)
+                index += end_id
+            else:
+                prev_batch_size_t = len(tags_t)
+
+                new_in_batch = torch.LongTensor(
+                    [end_id] * (batch_size_t - prev_batch_size_t)).to(device)
+                offset = torch.cat(
+                    [tags_t, new_in_batch],
+                    dim=0
+                )  # 这个offset实际上就是前一时刻的
+                index = torch.ones(batch_size_t).long() * (step * tagset_size)
+                index = index.to(device)
+                index += offset.long()
+
+            try:
+                tags_t = backpointer[:batch_size_t].gather(
+                    dim=1, index=index.unsqueeze(1).long())
+            except RuntimeError:
+                import pdb
+                pdb.set_trace()
+            tags_t = tags_t.squeeze(1)
+            tagids.append(tags_t.tolist())
+
+        # tagids:[L-1]（L-1是因为扣去了end_token),大小的liebiao
+        # 其中列表内的元素是该batch在该时刻的标记
+        # 下面修正其顺序，并将维度转换为 [B, L]
+        tagids = list(zip_longest(*reversed(tagids), fillvalue=pad))
+        tagids = torch.Tensor(tagids).long()
+
+        # 返回解码的结果
+        return tagids
+
 
 # ================================= util functions ================================= #
 def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
@@ -243,6 +443,7 @@ def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
     i_medicine = category_dict['I_n_medicine']
 
     def get_entity_id(seq_item: list, item: np.ndarray, b_e, i_e):
+        item = item[1:]
         begin = np.where(item == b_e)[0]
         result = []
         if len(begin) == 0:
@@ -326,7 +527,7 @@ OUTPUT_SIZE = len(category)
 BATCH_SIZE = 64
 EM_DIM = VECTOR_SIZE
 LR = 1e-2
-INPUT_SIZE = max_seq_len
+INPUT_SIZE = len(vocab)
 NUM_LAYERS = 1
 EPOCH = 150
 
@@ -350,7 +551,7 @@ for epoch in range(EPOCH):
     # training
     model.train()
     train_loss = 0
-    if (epoch + 1) % 2 == 0:
+    if (epoch + 1) % 10 == 0:
         fold_index = (fold_index + 1) % 10
         train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
                                            fold_index=fold_index)
@@ -364,7 +565,7 @@ for epoch in range(EPOCH):
         optim.zero_grad()
 
         output = model(data)
-        loss = criterion(output.view((-1, output.size(2))), label.view(-1))
+        loss = model.caculate_loss(output, label, criterion)
 
         loss.backward()
         optim.step()
@@ -377,30 +578,16 @@ for epoch in range(EPOCH):
         data, label = next(iter(valid_dataloader))
         data, label = data.to(DEVICE), label.to(DEVICE)
         output = model(data)
-        pred = torch.argmax(output, 2).data.cpu().numpy()
-        valid_loss = criterion(output.view((-1, output.size(2))), label.view(-1))
-        valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1).data.cpu(),
-                                      label.view(-1).data.cpu())
+        pred = model.get_word_id(output)
+        valid_loss = model.caculate_loss(output, label, criterion)
         p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
                                  true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
-    print('epoch: {}, train_loss: {}, valid_loss: {}, acc: {}, precision: {}, recall: {}, f1: {}'.
-          format(epoch, train_loss / len(train_dataloader), valid_loss, valid_acc, p, r, f))
+    print('epoch: {}, train_loss: {}, valid_loss: {}, precision: {}, recall: {}, f1: {}'.
+          format(epoch, train_loss / len(train_dataloader), valid_loss, p, r, f))
 
-# torch.save(model.state_dict(), './model.pkl')
+torch.save(model.state_dict(), './model.pkl')
 # model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
-# model.eval()
-# with torch.no_grad():
-#     data, label = next(iter(valid_dataloader))
-#     data, label = data.to(DEVICE), label.to(DEVICE)
-#     output = model(data)
-#     pred = torch.argmax(output, 2).data.cpu().numpy()
-#     valid_loss = criterion(output.view((-1, output.size(2))), label.view(-1))
-#     valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1).data.cpu(),
-#                                   label.view(-1).data.cpu())
-#     valid_f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs))
-#
-# print('valid_loss: {}, acc: {}, f_acc: {}'.format(valid_loss, valid_acc, valid_f_acc))
 
 # testing
 model.eval()
