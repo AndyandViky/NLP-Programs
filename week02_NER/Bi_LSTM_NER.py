@@ -4,19 +4,18 @@
 @Contact: andy_viky@163.com
 @Github: https://github.com/AndyandViky
 @Csdn: https://blog.csdn.net/AndyViky
-@File: LSTM_NER.py
+@File: Bi_LSTM_NER.py
 @Time: 2020/7/3 上午9:42
-@Desc: LSTM_NER.py
+@Desc: Bi_LSTM_NER.py
 """
 import re
-import pandas as pd
 import numpy as np
 import string
 import torch
 import torch.nn as nn
 import pandas as pd
 
-from torch.nn import LSTM, GRU
+from torch.nn import LSTM
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
@@ -86,7 +85,7 @@ def char_split(sentence: str) -> list:
         s_arr.append(word)
     return s_arr
 # calculate word2vector
-VECTOR_SIZE = 100
+VECTOR_SIZE = 150
 token = [char_split(i) for i in seq_datas]
 token.insert(0, ['UNK'])
 model = Word2Vec(token, window=10, size=VECTOR_SIZE, min_count=0).wv
@@ -105,7 +104,7 @@ train_char_ids = [get_char_id(seqence) for seqence in train_seqs]
 test_char_ids = [get_char_id(seqence) for seqence in test_seqs]
 
 
-# pad data and labels
+# padding data and labels
 UNK_INDEX = vocab['UNK'].index
 train_char_ids = [item + [UNK_INDEX for i in range(max_seq_len - len(item))] for item in train_char_ids]
 train_char_ids = np.array(train_char_ids)
@@ -122,15 +121,18 @@ for c in category:
     train_char_labels[train_char_labels == c] = category_dict[c]
 train_char_labels = train_char_labels.astype(np.int)
 
-VALID_PART = 1 / 9
-valid_seqs = train_seqs[int(len(train_seqs) * (1 - VALID_PART)):]
+VALID_PART = 1 / 10 # using 10-fold cross validation
 
 
 class AnswerData(Dataset):
     """
     building user`s data container
     """
-    def __init__(self, root: str, transform, data_type_name: str = 'TRAIN', split_type: int = 0):
+    def __init__(self, root: str,
+                 transform,
+                 data_type_name: str = 'TRAIN',
+                 split_type: int = 0,
+                 fold_index: int = 0):
         """
         :param root:
         :param data_name:
@@ -143,6 +145,7 @@ class AnswerData(Dataset):
         self.root = root
         self.transform = transform
         self.train = train
+        self.fold_index = fold_index
         data_type = {
             'TRAIN': 0,
             'VALID': 1,
@@ -168,26 +171,36 @@ class AnswerData(Dataset):
 
     def preprocess(self, data_type: int = 0) -> Tuple:
 
-        train_index = int(len(train_seqs) * (1 - VALID_PART))
+        train_index, valid_index = get_10_fold_index(self.fold_index, len(train_seqs))
         if data_type == 0:
-            return train_char_ids[:train_index], train_char_labels[:train_index]
+            return train_char_ids[train_index], train_char_labels[train_index]
         elif data_type == 1:
-            return train_char_ids[train_index:], train_char_labels[train_index:]
+            return train_char_ids[valid_index], train_char_labels[valid_index]
         elif data_type == 2:
             return test_char_ids, None
         else:
             raise Exception
 
 
-def get_data_loader(root: str, data_type_name: str, split_type: int, batch_size: int, shuffle: bool = True) -> DataLoader:
+def get_data_loader(root: str,
+                    data_type_name: str,
+                    split_type: int,
+                    batch_size: int,
+                    shuffle: bool = True,
+                    fold_index: int = 0) -> DataLoader:
 
-    dataset = AnswerData(root, transform=lambda x: torch.tensor(x), data_type_name=data_type_name, split_type=split_type)
+    dataset = AnswerData(root,
+                         transform=lambda x: torch.tensor(x),
+                         data_type_name=data_type_name,
+                         split_type=split_type,
+                         fold_index=fold_index)
     dataloader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size)
 
     return dataloader
 
 
-class Model(nn.Module):
+# ================================= model ================================= #
+class BiLSTM(nn.Module):
 
     def __init__(self, input_dim: int,
                  hidden_dim: int = 64,
@@ -196,7 +209,7 @@ class Model(nn.Module):
                  num_layers: int = 1,
                  bidirectional: bool = True,
                  pre_model: Tensor = None):
-        super(Model, self).__init__()
+        super(BiLSTM, self).__init__()
 
         self.bidirectional = bidirectional
         if pre_model is not None:
@@ -220,6 +233,7 @@ class Model(nn.Module):
         return output
 
 
+# ================================= util functions ================================= #
 def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
     b_crop = category_dict['B_n_crop']
     i_crop = category_dict['I_n_crop']
@@ -240,7 +254,7 @@ def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
             seq = seq + seq_item[j]
             if j != len(item) - 1:
                 for k in range(j + 1, len(item)):
-                    if item[k] == i_e:
+                    if item[k] == i_e and k < len(seq_item):
                         seq = seq + seq_item[k]
                     else:
                         break
@@ -258,14 +272,12 @@ def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
     return crops, diseases, medicines
 
 
-def caculate_f_acc(crops: list, diseases: list, medicines: list) -> Tuple:
+def caculate_f_acc(crops: list, diseases: list, medicines: list, true_labels: np.ndarray) -> Tuple:
 
     precision = 0
     recall = 0
     f_scores = 0
     n = len(crops)
-    train_index = int(len(train_seqs) * (1 - VALID_PART))
-    true_labels = train[train_index:, 1:]
 
     def calculate_tl_fl(item: list, true_item: list) -> Tuple:
         true_item = eval(true_item)
@@ -295,6 +307,16 @@ def caculate_f_acc(crops: list, diseases: list, medicines: list) -> Tuple:
     return precision / n, recall / n, f_scores / n
 
 
+def get_10_fold_index(fold_index: int, n: int) -> Tuple:
+
+    index = np.array([i for i in range(n)])
+    valid_len = n // 10
+    valid_index = index[fold_index * valid_len:(fold_index + 1) * valid_len]
+    train_index = np.delete(index, valid_index)
+    return train_index, valid_index
+
+
+# ================================= hyper params ================================= #
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 TRAIN = 'TRAIN'
 VALID = 'VALID'
@@ -309,21 +331,32 @@ NUM_LAYERS = 1
 EPOCH = 150
 
 # init model
-model = Model(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
+model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
 # init optimization
-optim = torch.optim.Adam(model.parameters(), lr=LR)
+optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
 # init criterion
 criterion = nn.CrossEntropyLoss().to(DEVICE)
-# get_dataloader
-train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE)
-valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False)
+# get data iterator
 test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000, shuffle=False)
+train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
+                                           fold_index=0)
+valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
+                                   fold_index=0)
+valid_seqs = np.array(train_seqs)[get_10_fold_index(0, len(train_seqs))[1]]
 
 print('begin training ......')
+fold_index = 0 # using 10-fold cross validation
 for epoch in range(EPOCH):
     # training
     model.train()
     train_loss = 0
+    if (epoch + 1) % 2 == 0:
+        fold_index = (fold_index + 1) % 10
+        train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
+                                           fold_index=fold_index)
+        valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
+                                           fold_index=fold_index)
+        valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
     for index, (data, label) in enumerate(train_dataloader):
         data, label = data.to(DEVICE), label.to(DEVICE)
 
@@ -348,7 +381,8 @@ for epoch in range(EPOCH):
         valid_loss = criterion(output.view((-1, output.size(2))), label.view(-1))
         valid_acc = caculate_accuracy(torch.argmax(output, 2).view(-1).data.cpu(),
                                       label.view(-1).data.cpu())
-        p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs))
+        p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
+                                 true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
     print('epoch: {}, train_loss: {}, valid_loss: {}, acc: {}, precision: {}, recall: {}, f1: {}'.
           format(epoch, train_loss / len(train_dataloader), valid_loss, valid_acc, p, r, f))
