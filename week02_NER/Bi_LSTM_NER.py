@@ -96,7 +96,7 @@ vectors = model.vectors
 
 
 # calculate char id
-def get_char_id(seqence):
+def get_char_id(seqence: list) -> list:
     ids = []
     for char in seqence:
         ids.append(vocab[char].index)
@@ -116,9 +116,8 @@ for c in category:
     train_char_labels[train_char_labels == c] = category_dict[c]
 train_char_labels = train_char_labels.astype(np.int)
 
-VALID_PART = 1 / 10 # using 10-fold cross validation
 
-
+# ================================= data ================================= #
 class AnswerData(Dataset):
     """
     building user`s data container
@@ -539,91 +538,97 @@ def tensorized(datas: Tensor, labels=None) -> Tuple:
     return datas, labels, lengths
 
 
-# ================================= hyper params ================================= #
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-TRAIN = 'TRAIN'
-VALID = 'VALID'
-TEST = 'TEST'
-HIDDEN_DIM = 64
-OUTPUT_SIZE = len(category)
-BATCH_SIZE = 64
-EM_DIM = VECTOR_SIZE
-LR = 1e-2
-INPUT_SIZE = len(vocab)
-NUM_LAYERS = 1
-EPOCH = 150
+# ================================= main ================================= #
+def main():
+    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    TRAIN = 'TRAIN'
+    VALID = 'VALID'
+    TEST = 'TEST'
+    HIDDEN_DIM = 64
+    OUTPUT_SIZE = len(category)
+    BATCH_SIZE = 64
+    EM_DIM = VECTOR_SIZE
+    LR = 1e-2
+    INPUT_SIZE = len(vocab)
+    NUM_LAYERS = 1
+    EPOCH = 150
 
-# init model
-model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
-# init optimization
-optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-# init criterion
-criterion = nn.CrossEntropyLoss().to(DEVICE)
-# get data iterator
-test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000, shuffle=False)
-train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
-                                           fold_index=0)
-valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
-                                   fold_index=0)
-valid_seqs = np.array(train_seqs)[get_10_fold_index(0, len(train_seqs))[1]]
+    # init model
+    model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(
+        DEVICE)
+    # init optimization
+    optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
+    # init criterion
+    criterion = nn.CrossEntropyLoss().to(DEVICE)
+    # get data iterator
+    test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000, shuffle=False)
+    train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
+                                       fold_index=0)
+    valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
+                                       fold_index=0)
+    valid_seqs = np.array(train_seqs)[get_10_fold_index(0, len(train_seqs))[1]]
 
-print('begin training ......')
-fold_index = 0 # using 10-fold cross validation
-for epoch in range(EPOCH):
-    # training
-    model.train()
-    train_loss = 0
-    if (epoch + 1) % 10 == 0:
-        fold_index = (fold_index + 1) % 10
-        train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
-                                           fold_index=fold_index)
-        valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
-                                           fold_index=fold_index)
-        valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
-    for index, (data, label) in enumerate(train_dataloader):
+    print('begin training ......')
+    fold_index = 0  # using 10-fold cross validation
+    for epoch in range(EPOCH):
+        # training
+        model.train()
+        train_loss = 0
+        if (epoch + 1) % 10 == 0:
+            fold_index = (fold_index + 1) % 10
+            train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
+                                               fold_index=fold_index)
+            valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000,
+                                               shuffle=False,
+                                               fold_index=fold_index)
+            valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
+        for index, (data, label) in enumerate(train_dataloader):
+            data, label, _ = tensorized(data, label)
+            data, label = data.to(DEVICE), label.to(DEVICE)
 
-        data, label, _ = tensorized(data, label)
-        data, label = data.to(DEVICE), label.to(DEVICE)
+            model.zero_grad()
+            optim.zero_grad()
 
-        model.zero_grad()
-        optim.zero_grad()
+            output = model(data)
+            loss = model.caculate_loss(output, label, criterion)
 
-        output = model(data)
-        loss = model.caculate_loss(output, label, criterion)
+            loss.backward()
+            optim.step()
 
-        loss.backward()
-        optim.step()
+            train_loss += loss.item()
 
-        train_loss += loss.item()
+        # validation
+        model.eval()
+        with torch.no_grad():
+            data, label = next(iter(valid_dataloader))
+            data, label, lengths = tensorized(data, label)
+            data, label = data.to(DEVICE), label.to(DEVICE)
+            output = model(data)
+            pred = model.get_word_id(output, lengths)
+            valid_loss = model.caculate_loss(output, label, criterion)
+            p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
+                                     true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
-    # validation
+        print('epoch: {}, train_loss: {}, valid_loss: {}, precision: {}, recall: {}, f1: {}'.
+              format(epoch, train_loss / len(train_dataloader), valid_loss, p, r, f))
+
+    torch.save(model.state_dict(), './model.pkl')
+    # model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
+
+    # testing
     model.eval()
     with torch.no_grad():
-        data, label = next(iter(valid_dataloader))
-        data, label, lengths = tensorized(data, label)
-        data, label = data.to(DEVICE), label.to(DEVICE)
+        data = next(iter(test_dataloader))
+        data, _, lengths = tensorized(data)
+        data = data.to(DEVICE)
+
         output = model(data)
         pred = model.get_word_id(output, lengths)
-        valid_loss = model.caculate_loss(output, label, criterion)
-        p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
-                                 true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
-    print('epoch: {}, train_loss: {}, valid_loss: {}, precision: {}, recall: {}, f1: {}'.
-          format(epoch, train_loss / len(train_dataloader), valid_loss, p, r, f))
+        crops, diseases, medicines = drop_entity(pred, test_seqs)
+        pd.DataFrame([test[:, 0], crops, diseases, medicines]).T. \
+            to_csv('./result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
 
-torch.save(model.state_dict(), './model.pkl')
-# model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
 
-# testing
-model.eval()
-with torch.no_grad():
-    data = next(iter(test_dataloader))
-    data, _, lengths = tensorized(data)
-    data = data.to(DEVICE)
-
-    output = model(data)
-    pred = model.get_word_id(output, lengths)
-
-    crops, diseases, medicines = drop_entity(pred, test_seqs)
-    pd.DataFrame([test[:, 0], crops, diseases, medicines]).T.\
-        to_csv('./result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
+if __name__ == '__main__':
+    main()
