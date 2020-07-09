@@ -243,7 +243,7 @@ class BiLSTM(nn.Module):
 
         return criterion(logits, targets)
 
-    def get_word_id(self, output: Tensor) -> Tensor:
+    def get_word_id(self, output: Tensor, lengths=None) -> Tensor:
 
         return torch.argmax(output, 2).data.cpu().numpy()
 
@@ -358,7 +358,7 @@ class BiLSTM_CRF(nn.Module):
         loss = (all_path_scores - golden_scores) / batch_size
         return loss
 
-    def get_word_id(self, ouput: Tensor) -> Tensor:
+    def get_word_id(self, ouput: Tensor, lengths=None) -> Tensor:
 
         """使用维特比算法进行解码"""
         start_id = category_dict['<start>']
@@ -517,6 +517,28 @@ def get_10_fold_index(fold_index: int, n: int) -> Tuple:
     return train_index, valid_index
 
 
+def tensorized(datas: Tensor, labels=None) -> Tuple:
+
+    datas = datas.data.numpy()
+    PAD = vocab['<pad>'].index
+    C_PAD = category_dict['<pad>']
+
+    mask = (datas != PAD)  # [B, L]
+    datas = [i[mask[index]] for index, i in enumerate(datas)]
+    lengths = [len(l) for l in datas]
+    max_len = max([len(i) for i in datas])
+
+    datas = [np.concatenate((item, np.array([PAD for i in range(max_len - len(item))]))) for item in datas]
+    datas = torch.tensor(datas).long()
+    if labels is not None:
+        labels = labels.data.numpy()
+        labels = [i[mask[index]] for index, i in enumerate(labels)]
+        labels = [np.concatenate((item, np.array([C_PAD for i in range(max_len - len(item))]))) for item in labels]
+        labels = torch.tensor(labels).long()
+
+    return datas, labels, lengths
+
+
 # ================================= hyper params ================================= #
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 TRAIN = 'TRAIN'
@@ -532,7 +554,7 @@ NUM_LAYERS = 1
 EPOCH = 150
 
 # init model
-model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
+model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(DEVICE)
 # init optimization
 optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
 # init criterion
@@ -559,6 +581,8 @@ for epoch in range(EPOCH):
                                            fold_index=fold_index)
         valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
     for index, (data, label) in enumerate(train_dataloader):
+
+        data, label, _ = tensorized(data, label)
         data, label = data.to(DEVICE), label.to(DEVICE)
 
         model.zero_grad()
@@ -576,9 +600,10 @@ for epoch in range(EPOCH):
     model.eval()
     with torch.no_grad():
         data, label = next(iter(valid_dataloader))
+        data, label, lengths = tensorized(data, label)
         data, label = data.to(DEVICE), label.to(DEVICE)
         output = model(data)
-        pred = model.get_word_id(output)
+        pred = model.get_word_id(output, lengths)
         valid_loss = model.caculate_loss(output, label, criterion)
         p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
                                  true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
@@ -593,10 +618,11 @@ torch.save(model.state_dict(), './model.pkl')
 model.eval()
 with torch.no_grad():
     data = next(iter(test_dataloader))
+    data, _, lengths = tensorized(data)
     data = data.to(DEVICE)
 
     output = model(data)
-    pred = torch.argmax(output, 2).data.cpu().numpy()
+    pred = model.get_word_id(output, lengths)
 
     crops, diseases, medicines = drop_entity(pred, test_seqs)
     pd.DataFrame([test[:, 0], crops, diseases, medicines]).T.\
