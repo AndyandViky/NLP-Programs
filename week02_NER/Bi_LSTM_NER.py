@@ -24,97 +24,144 @@ from gensim.models import Word2Vec
 
 from utils.utils import caculate_accuracy
 
-z_punctuation = '[' + string.punctuation + u' a-zA-Z0-9·！？。＂＃＄％%＆＇（）＊＋，－／：；＜＝＞＠［＼］＾＿｀｛｜｝～｟｠｢｣､、〃》「」『』【】〔〕〖〗〘〙〚〛〜〝〞〟〰〾〿–—‘’‛“”„‟…‧﹏.]'
+
+def get_punctuation() -> str:
+
+    z_punctuation = '[' + string.punctuation + u' a-zA-Z0-9·！，+？＂＃＄％%＆＇（）＊★＋－／：＜＝＞＠［＼］＾＿｀｛｜｝～' \
+                                               u'｟｠｢｣､〃》「」『』【】〔〕〖〗〘〙〚〛〜〝〞〟〰〾〿–—‘’‛“”„‟…‧﹏.]'
+    return z_punctuation
+
+
 DATA_DIR = './datas/QA_data'
-'''
-pre-processing data
-'''
-train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
-test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
+# ================================= pre-processing data ================================= #
+def get_process_data(train: list) -> Tuple:
 
-entity = ['n_disease', 'n_crop', 'n_medicine']
-# split data and labels
-def split_raw_data(sequence: str) -> Tuple[np.ndarray, str, list]:
-    sequence = sequence.replace('，', '')
-    sequence = sequence.replace('//', '/')
-    raw_arr = sequence.split(' ')
-    datas = np.array([i.split('/') for i in raw_arr if i != '' and len(i.split('/')) == 2])
-    # delete symbol
-    delete_index = []
-    for ind, item in enumerate(datas):
-        item[0] = item[0].replace(' ', '')
-        if len(item[0]) == 1:
-            # delete single symbol
-            if item[0] in z_punctuation:
-                delete_index.append(ind)
+    entity = ['n_disease', 'n_crop', 'n_medicine']
+    # split data and labels
+    def split_raw_data(sequence: str, index: int) -> Tuple[np.ndarray, str, list]:
+        sequence = sequence.replace('，', '，/dj ')
+        sequence = sequence.replace('%', '%/pj ')
+        sequence = sequence.replace('+', '+/aj ')
+        sequence = sequence.replace('＋', '+/aj ')
+        sequence = sequence.replace('·', '·/w ')
+        sequence = sequence.replace('％', '%/pj ')
+        raw_arr = sequence.split(' ')
+        datas = np.array([i.split('/') for i in raw_arr if i != '' and len(i.split('/')) == 2])
+        # delete_index = []
+        for ind, item in enumerate(datas):
+            item[0] = item[0].replace(' ', '')
+        #     if len(item[0]) == 1:
+        #         # delete single symbol
+        #         if item[0] in get_punctuation():
+        #             delete_index.append(ind)
+        #     else:
+        #         # delete symbol inner sentence
+        #         item[0] = re.sub(get_punctuation(), '', item[0])
+        #         if item[0] == '':
+        #             delete_index.append(ind)
+        # datas = np.delete(datas, delete_index, axis=0)
+        # 623, 2081, 2516
+        if index == 623:
+            datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
+        if index == 2081:
+            datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
+        if index == 2516:
+            datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
+
+        keys = datas[:, 1]
+        values = datas[:, 0]
+        values = np.delete(values, [index for index, k in enumerate(keys) if k not in entity])
+        true_values = []
+        for item in train[index, 1:]:
+            true_values = true_values + eval(item)
+
+        if len(values) == len(true_values):
+            for i in values:
+                if i not in true_values:
+                    print(1)
         else:
-            # delete symbol inner sentence
-            item[0] = re.sub(z_punctuation, '', item[0])
-    datas = np.delete(datas, delete_index, axis=0)
+            print(1)
 
-    char_labels = []
-    for (word, label) in datas:
-        if label not in entity:
-            char_labels = char_labels + ['O' for i in range(len(word))]
-        else:
-            char_labels.append('B_{}'.format(label))
-            char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 1)]
+        char_labels = []
+        for (word, label) in datas:
+            if label not in entity:
+                char_labels = char_labels + ['O' for i in range(len(word))]
+            else:
+                char_labels.append('B_{}'.format(label))
+                char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 1)]
 
-    seq_data = ''
-    for char in datas[:, 0]:
-        seq_data = seq_data + char
-    return datas, seq_data, char_labels
+        seq_data = ''
+        for char in datas[:, 0]:
+            seq_data = seq_data + char
+        return datas, seq_data, char_labels
 
+    train_seqs = []
+    train_char_labels = []
+    word_datas = []
+    for ind, item in enumerate(train[:, 0]):
+        word_data, seq_data, char_labels = split_raw_data(item, ind)
+        train_seqs.append(seq_data)
+        train_char_labels.append(char_labels)
+        word_datas.append(word_data)
 
-train_seqs = []
-train_char_labels = []
-word_datas = []
-for item in train[:, 0]:
-    word_data, seq_data, char_labels = split_raw_data(item)
-    train_seqs.append(seq_data)
-    train_char_labels.append(char_labels)
-    word_datas.append(word_data)
-
-# combine test data to build vocab
-test_seqs = [re.sub(z_punctuation, '', sentence) for sentence in test[:, 1]]
-seq_datas = train_seqs + test_seqs
-max_seq_len = max([len(i) for i in seq_datas]) + 2
-
-def char_split(sentence: str) -> list:
-    s_arr = ['<start>']
-    for word in sentence:
-        s_arr.append(word)
-    s_arr.append('<end>')
-    s_arr = s_arr + ['<pad>' for i in range(max_seq_len - len(s_arr))]
-    return s_arr
-# calculate word2vector
-VECTOR_SIZE = 150
-token = [char_split(i) for i in seq_datas]
-model = Word2Vec(token, window=10, size=VECTOR_SIZE, min_count=0).wv
-vocab = model.vocab
-vectors = model.vectors
+    return train_seqs, train_char_labels, word_datas
 
 
-# calculate char id
-def get_char_id(seqence: list) -> list:
-    ids = []
-    for char in seqence:
-        ids.append(vocab[char].index)
-    return ids
-train_char_ids = np.array([get_char_id(seqence) for seqence in token[:len(train_seqs)]])
-test_char_ids = np.array([get_char_id(seqence) for seqence in token[len(train_seqs):]])
+def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vector_size: int = 150) -> Tuple:
+    # combine test data to build vocab
+    seq_datas = train_seqs + test_seqs
+
+    def char_split(sentence: str) -> list:
+        s_arr = []
+        for word in sentence:
+            s_arr.append(word)
+        return s_arr
+
+    # calculate word2vector
+    token = [char_split(i) for i in seq_datas]
+    if use_word:
+        token.insert(0, ['<pad>', '<start>', '<end>', '<unk>'])
+        model = Word2Vec(token, window=10, size=vector_size, min_count=0).wv
+        vocab = dict(
+            [(key, value.index) for key, value in model.vocab.items()]
+        )
+        vectors = model.vectors
+        return vocab, token[1:], vectors
+    else:
+        vocab = {}
+        return vocab, token[1:], None
 
 
-# padding labels
-train_char_labels = [['<start>'] + item + ['<end>'] + ['<pad>' for i in range(max_seq_len - 2 - len(item))] for item in train_char_labels]
-category = np.unique(np.array(sum(train_char_labels, [])))
-category_dict = dict(
-    [(c, index) for index, c in enumerate(category)]
-)
-train_char_labels = np.array(train_char_labels)
-for c in category:
-    train_char_labels[train_char_labels == c] = category_dict[c]
-train_char_labels = train_char_labels.astype(np.int)
+def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int, crf: bool = False) -> Tuple:
+
+    if crf:
+        train_char_labels = [['<start>'] + item + ['<end>'] for item in train_char_labels]
+        token = [['<start>'] + item + ['<end>'] for item in token]
+    # char to id
+    def get_char_id(sequence: list, vocab: dict) -> list:
+        ids = []
+        for char in sequence:
+            ids.append(vocab.get(char))
+        return ids
+    train_char_ids = np.array([get_char_id(sequence, vocab) for sequence in token[:train_length]])
+    test_char_ids = np.array([get_char_id(sequence, vocab) for sequence in token[train_length:]])
+
+    category = np.unique(np.array(sum(train_char_labels, [])))
+    category_dict = dict(
+        [(c, index) for index, c in enumerate(category)]
+    )
+    category_dict.update({'<pad>': len(category_dict)})
+    category_dict.update({'<unk>': len(category_dict)})
+
+    def get_label_id(labels: list):
+        ids = []
+        for c in labels:
+            # label to id
+            ids.append(category_dict[c])
+        return ids
+    train_char_labels = np.array([get_label_id(labels) for labels in train_char_labels])
+
+    return train_char_ids, train_char_labels, test_char_ids, category_dict
 
 
 # ================================= data ================================= #
@@ -123,7 +170,10 @@ class AnswerData(Dataset):
     building user`s data container
     """
     def __init__(self, root: str,
-                 transform,
+                 train_char_ids: np.ndarray,
+                 train_char_labels: np.ndarray,
+                 test_char_ids: np.ndarray,
+                 train_length: int,
                  data_type_name: str = 'TRAIN',
                  split_type: int = 0,
                  fold_index: int = 0):
@@ -137,9 +187,12 @@ class AnswerData(Dataset):
         super(AnswerData, self).__init__()
 
         self.root = root
-        self.transform = transform
         self.train = train
         self.fold_index = fold_index
+        self.train_length = train_length
+        self.train_char_ids = train_char_ids
+        self.train_char_labels = train_char_labels
+        self.test_char_ids = test_char_ids
         data_type = {
             'TRAIN': 0,
             'VALID': 1,
@@ -151,12 +204,10 @@ class AnswerData(Dataset):
 
         if self.labels is not None:
             data, label = self.datas[item], self.labels[item]
-            data = self.transform(data)
 
-            return data, torch.tensor(label)
+            return data, label
         else:
             data = self.datas[item]
-            data = self.transform(data)
 
             return data
 
@@ -165,32 +216,43 @@ class AnswerData(Dataset):
 
     def preprocess(self, data_type: int = 0) -> Tuple:
 
-        train_index, valid_index = get_10_fold_index(self.fold_index, len(train_seqs))
+        train_index, valid_index = get_10_fold_index(self.fold_index, self.train_length)
         if data_type == 0:
-            return train_char_ids[train_index], train_char_labels[train_index]
+            return self.train_char_ids[train_index], self.train_char_labels[train_index]
         elif data_type == 1:
-            return train_char_ids[valid_index], train_char_labels[valid_index]
+            return self.train_char_ids[valid_index], self.train_char_labels[valid_index]
         elif data_type == 2:
-            return test_char_ids, None
+            return self.test_char_ids, None
         else:
             raise Exception
 
 
 def get_data_loader(root: str,
-                    data_type_name: str,
-                    split_type: int,
-                    batch_size: int,
-                    shuffle: bool = True,
-                    fold_index: int = 0) -> DataLoader:
+                    data_type_name: list,
+                    batch_size: list,
+                    train_char_ids: np.ndarray,
+                    train_char_labels: np.ndarray,
+                    test_char_ids: np.ndarray,
+                    train_length: int,
+                    split_type: int = 0,
+                    shuffle: list = [True, False, False],
+                    fold_index: int = 0,
+                    test: bool = True) -> list:
 
-    dataset = AnswerData(root,
-                         transform=lambda x: torch.tensor(x),
-                         data_type_name=data_type_name,
-                         split_type=split_type,
-                         fold_index=fold_index)
-    dataloader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size)
+    dataloader = []
+    for i in range(len(batch_size)):
+        dataset = AnswerData(root,
+                             data_type_name=data_type_name[i],
+                             split_type=split_type,
+                             fold_index=fold_index,
+                             train_length=train_length,
+                             train_char_ids=train_char_ids,
+                             train_char_labels=train_char_labels,
+                             test_char_ids=test_char_ids, )
+        dataloader.append(DataLoader(dataset, shuffle=shuffle[i], batch_size=batch_size[i],
+                                     collate_fn=lambda batch: np.array(batch)))
 
-    return dataloader
+    return dataloader if test else dataloader[:2]
 
 
 # ================================= model ================================= #
@@ -226,7 +288,7 @@ class BiLSTM(nn.Module):
         output = torch.softmax(self.out(output), dim=2)
         return output
 
-    def caculate_loss(self, output: Tensor, target: Tensor, criterion=None) -> Tensor:
+    def caculate_loss(self, output: Tensor, target: Tensor, category_dict: dict, criterion=None) -> Tensor:
 
         PAD = category_dict['<pad>']
         assert PAD is not None
@@ -242,7 +304,7 @@ class BiLSTM(nn.Module):
 
         return criterion(logits, targets)
 
-    def get_word_id(self, output: Tensor, lengths=None) -> Tensor:
+    def get_word_id(self, output: Tensor, category_dict: dict, lengths=None) -> Tensor:
 
         return torch.argmax(output, 2).data.cpu().numpy()
 
@@ -293,7 +355,7 @@ class BiLSTM_CRF(nn.Module):
         targets[:, 0] += (start_id * tagset_size)
         return targets
 
-    def caculate_loss(self, output: Tensor, target: Tensor, criterion=None) -> Tensor:
+    def caculate_loss(self, output: Tensor, target: Tensor, category_dict: dict, criterion=None) -> Tensor:
 
         pad_id = category_dict['<pad>']
         start_id = category_dict['<start>']
@@ -357,7 +419,7 @@ class BiLSTM_CRF(nn.Module):
         loss = (all_path_scores - golden_scores) / batch_size
         return loss
 
-    def get_word_id(self, ouput: Tensor, lengths=None) -> Tensor:
+    def get_word_id(self, ouput: Tensor, category_dict: dict, lengths=None) -> Tensor:
 
         """使用维特比算法进行解码"""
         start_id = category_dict['<start>']
@@ -433,7 +495,7 @@ class BiLSTM_CRF(nn.Module):
 
 
 # ================================= util functions ================================= #
-def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
+def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict) -> Tuple:
     b_crop = category_dict['B_n_crop']
     i_crop = category_dict['I_n_crop']
     b_disease = category_dict['B_n_disease']
@@ -442,7 +504,6 @@ def drop_entity(pred: np.ndarray, test_seqs: list) -> Tuple:
     i_medicine = category_dict['I_n_medicine']
 
     def get_entity_id(seq_item: list, item: np.ndarray, b_e, i_e):
-        item = item[1:]
         begin = np.where(item == b_e)[0]
         result = []
         if len(begin) == 0:
@@ -516,42 +577,89 @@ def get_10_fold_index(fold_index: int, n: int) -> Tuple:
     return train_index, valid_index
 
 
-def tensorized(datas: Tensor, labels=None) -> Tuple:
+def tensorized(batch: list, map: dict) -> Tuple:
 
-    datas = datas.data.numpy()
-    PAD = vocab['<pad>'].index
-    C_PAD = category_dict['<pad>']
+    PAD = map['<pad>']
 
-    mask = (datas != PAD)  # [B, L]
-    datas = [i[mask[index]] for index, i in enumerate(datas)]
-    lengths = [len(l) for l in datas]
-    max_len = max([len(i) for i in datas])
+    max_len = max([len(i) for i in batch])
 
-    datas = [np.concatenate((item, np.array([PAD for i in range(max_len - len(item))]))) for item in datas]
-    datas = torch.tensor(datas).long()
-    if labels is not None:
-        labels = labels.data.numpy()
-        labels = [i[mask[index]] for index, i in enumerate(labels)]
-        labels = [np.concatenate((item, np.array([C_PAD for i in range(max_len - len(item))]))) for item in labels]
-        labels = torch.tensor(labels).long()
+    batch_tensor = torch.tensor([item + [PAD for i in range(max_len - len(item))] for item in batch])
+    # batch各个元素的长度
+    lengths = [len(l) for l in batch]
 
-    return datas, labels, lengths
+    return batch_tensor, lengths
+
+
+def build_lexi(data: np.ndarray) -> Tuple:
+
+    crops = data[:, 0]
+    diseases = data[:, 1]
+    medicines = data[:, 2]
+
+    l_crops = []
+    for item in crops:
+        item = eval(item)
+        for i in item:
+            if i not in l_crops:
+                l_crops.append(i)
+
+    l_diseases = []
+    for item in diseases:
+        item = eval(item)
+        for i in item:
+            if i not in l_diseases:
+                l_diseases.append(i)
+
+    l_medicines = []
+    for item in medicines:
+        item = eval(item)
+        for i in item:
+            if i not in l_medicines:
+                l_medicines.append(i)
+    return l_crops, l_diseases, l_medicines
+
+
+def delete_symbol(entitys: list) -> list:
+
+    pun = get_punctuation()
+    for in1, item in enumerate(entitys):
+        delete_index = []
+        for in2, entity in enumerate(item):
+            if len(entity) == 1:
+                delete_index.append(in2)
+            else:
+                entitys[in1][in2] = re.sub(pun, '', entitys[in1][in2])
+        entitys[in1] = np.delete(np.array(entitys[in1]), delete_index).tolist()
+    return entitys
 
 
 # ================================= main ================================= #
-def main():
+if __name__ == '__main__':
+
+    train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
+    test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
+    test_seqs = test[:, 1].tolist()
+    (l_crops, l_diseases, l_medicines) = build_lexi(train[:, 1:])
+
+    VECTOR_SIZE = 150
+    pre_train = True
+    USING_CRF = False
+    train_seqs, train_char_labels, word_datas = get_process_data(train)
+    vocab, token, vectors = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
+    train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels, len(train_seqs), USING_CRF)
+
     DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
     HIDDEN_DIM = 64
-    OUTPUT_SIZE = len(category)
+    OUTPUT_SIZE = len(category_dict)
     BATCH_SIZE = 64
     EM_DIM = VECTOR_SIZE
     LR = 1e-2
     INPUT_SIZE = len(vocab)
     NUM_LAYERS = 1
-    EPOCH = 150
+    EPOCH = 300
 
     # init model
     model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(
@@ -561,11 +669,17 @@ def main():
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
-    test_dataloader = get_data_loader(root='', data_type_name=TEST, split_type=0, batch_size=5000, shuffle=False)
-    train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
-                                       fold_index=0)
-    valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000, shuffle=False,
-                                       fold_index=0)
+    (train_dataloader, valid_dataloader, test_dataloader) = get_data_loader(
+        root='',
+        data_type_name=[TRAIN, VALID, TEST],
+        batch_size=[BATCH_SIZE, 5000, 5000],
+        fold_index=0,
+        train_length=len(train_seqs),
+        train_char_labels=train_char_labels,
+        train_char_ids=train_char_ids,
+        test_char_ids=test_char_ids,
+    )
+
     valid_seqs = np.array(train_seqs)[get_10_fold_index(0, len(train_seqs))[1]]
 
     print('begin training ......')
@@ -576,21 +690,28 @@ def main():
         train_loss = 0
         if (epoch + 1) % 10 == 0:
             fold_index = (fold_index + 1) % 10
-            train_dataloader = get_data_loader(root='', data_type_name=TRAIN, split_type=0, batch_size=BATCH_SIZE,
-                                               fold_index=fold_index)
-            valid_dataloader = get_data_loader(root='', data_type_name=VALID, split_type=0, batch_size=5000,
-                                               shuffle=False,
-                                               fold_index=fold_index)
+            (train_dataloader, valid_dataloader) = get_data_loader(
+                root='',
+                data_type_name=[TRAIN, VALID, TEST],
+                batch_size=[BATCH_SIZE, 5000, 5000],
+                fold_index=fold_index,
+                train_length=len(train_seqs),
+                train_char_labels=train_char_labels,
+                train_char_ids=train_char_ids,
+                test_char_ids=test_char_ids,
+                test=False,
+            )
             valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
-        for index, (data, label) in enumerate(train_dataloader):
-            data, label, _ = tensorized(data, label)
+        for index, batch in enumerate(train_dataloader):
+            data, _ = tensorized(batch[:, 0], vocab)
+            label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
 
             model.zero_grad()
             optim.zero_grad()
 
             output = model(data)
-            loss = model.caculate_loss(output, label, criterion)
+            loss = model.caculate_loss(output, label, category_dict, criterion)
 
             loss.backward()
             optim.step()
@@ -600,13 +721,14 @@ def main():
         # validation
         model.eval()
         with torch.no_grad():
-            data, label = next(iter(valid_dataloader))
-            data, label, lengths = tensorized(data, label)
+            batch = next(iter(valid_dataloader))
+            data, lengths = tensorized(batch[:, 0], vocab)
+            label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
             output = model(data)
-            pred = model.get_word_id(output, lengths)
-            valid_loss = model.caculate_loss(output, label, criterion)
-            p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs),
+            pred = model.get_word_id(output, category_dict, lengths)
+            valid_loss = model.caculate_loss(output, label, category_dict, criterion)
+            p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
         print('epoch: {}, train_loss: {}, valid_loss: {}, precision: {}, recall: {}, f1: {}'.
@@ -614,21 +736,34 @@ def main():
 
     torch.save(model.state_dict(), './model.pkl')
     # model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
+    # model.eval()
+    # with torch.no_grad():
+    #     batch = next(iter(valid_dataloader))
+    #     data, lengths = tensorized(batch[:, 0], vocab)
+    #     label, _ = tensorized(batch[:, 1], category_dict)
+    #     data, label = data.to(DEVICE), label.to(DEVICE)
+    #     output = model(data)
+    #     pred = model.get_word_id(output, category_dict, lengths)
+    #     valid_loss = model.caculate_loss(output, label, category_dict, criterion)
+    #     p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict),
+    #                              true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
 
     # testing
     model.eval()
     with torch.no_grad():
-        data = next(iter(test_dataloader))
-        data, _, lengths = tensorized(data)
+        batch = next(iter(test_dataloader))
+        data, lengths = tensorized(batch, vocab)
         data = data.to(DEVICE)
 
         output = model(data)
-        pred = model.get_word_id(output, lengths)
+        pred = model.get_word_id(output, category_dict, lengths)
 
-        crops, diseases, medicines = drop_entity(pred, test_seqs)
+        crops, diseases, medicines = drop_entity(pred, test_seqs, category_dict)
+        crops = delete_symbol(crops)
+        diseases = delete_symbol(diseases)
+        medicines = delete_symbol(medicines)
+        # crops = delete_symbol(crops)
+        # diseases = delete_symbol(diseases)
+        # medicines = delete_symbol(medicines)
         pd.DataFrame([test[:, 0], crops, diseases, medicines]).T. \
             to_csv('./result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
-
-
-if __name__ == '__main__':
-    main()
