@@ -135,8 +135,8 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
 def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int, crf: bool = False) -> Tuple:
 
     if crf:
-        train_char_labels = [['<start>'] + item + ['<end>'] for item in train_char_labels]
-        token = [['<start>'] + item + ['<end>'] for item in token]
+        train_char_labels = [item + ['<end>'] for item in train_char_labels]
+        token = [item + ['<end>'] for item in token]
     # char to id
     def get_char_id(sequence: list, vocab: dict) -> list:
         ids = []
@@ -152,6 +152,7 @@ def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int,
     )
     category_dict.update({'<pad>': len(category_dict)})
     category_dict.update({'<unk>': len(category_dict)})
+    category_dict.update({'<start>': len(category_dict)})
 
     def get_label_id(labels: list):
         ids = []
@@ -495,7 +496,7 @@ class BiLSTM_CRF(nn.Module):
 
 
 # ================================= util functions ================================= #
-def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict) -> Tuple:
+def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_process) -> Tuple:
     b_crop = category_dict['B_n_crop']
     i_crop = category_dict['I_n_crop']
     b_disease = category_dict['B_n_disease']
@@ -530,7 +531,7 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict) -> Tuple
         diseases.append(get_entity_id(test_seqs[index], item, b_disease, i_disease))
         medicines.append(get_entity_id(test_seqs[index], item, b_medicine, i_medicine))
 
-    return crops, diseases, medicines
+    return post_process(crops, 0), post_process(diseases, 1), post_process(medicines, 2)
 
 
 def caculate_f_acc(crops: list, diseases: list, medicines: list, true_labels: np.ndarray) -> Tuple:
@@ -538,34 +539,43 @@ def caculate_f_acc(crops: list, diseases: list, medicines: list, true_labels: np
     precision = 0
     recall = 0
     f_scores = 0
+    f_accs = 0
     n = len(crops)
 
     def calculate_tl_fl(item: list, true_item: list) -> Tuple:
         true_item = eval(true_item)
-        ttl = 0
+        tl = 0
+        fl = 0
         for j in item:
             if j in true_item:
-                ttl = ttl + 1
-        return ttl, len(item), len(true_item)
+                tl = tl + 1
+            else:
+                fl = fl + 1
+        fl = fl + len(true_item) - tl
+        return tl, fl, len(item), len(true_item)
 
     for i in range(n):
-        ttl, size, t_size = calculate_tl_fl(crops[i], true_labels[i, 0])
+        tl, fl, size, t_size = calculate_tl_fl(crops[i], true_labels[i, 0])
         result = calculate_tl_fl(diseases[i], true_labels[i, 1])
-        ttl = ttl + result[0]
-        size = size + result[1]
-        t_size = t_size + result[2]
+        tl = tl + result[0]
+        fl = fl + result[1]
+        size = size + result[2]
+        t_size = t_size + result[3]
         result = calculate_tl_fl(medicines[i], true_labels[i, 2])
-        ttl = ttl + result[0]
-        size = size + result[1]
-        t_size = t_size + result[2]
-        p = ttl / size if size != 0 else 0
-        r = ttl / t_size if t_size != 0 else 0
+        tl = tl + result[0]
+        fl = fl + result[1]
+        size = size + result[2]
+        t_size = t_size + result[3]
+        p = tl / size if size != 0 else 0
+        r = tl / t_size if t_size != 0 else 0
         f1 = (2 * p * r) / (p + r) if (p + r) != 0 else 0
+        f_acc = tl / (tl + fl)
+        f_accs = f_accs + f_acc
         f_scores = f_scores + f1
         precision = precision + p
         recall = recall + r
 
-    return precision / n, recall / n, f_scores / n
+    return precision / n, recall / n, f_scores / n, f_accs / n
 
 
 def get_10_fold_index(fold_index: int, n: int) -> Tuple:
@@ -590,47 +600,119 @@ def tensorized(batch: list, map: dict) -> Tuple:
     return batch_tensor, lengths
 
 
-def build_lexi(data: np.ndarray) -> Tuple:
+class PostProcess:
 
-    crops = data[:, 0]
-    diseases = data[:, 1]
-    medicines = data[:, 2]
+    def __init__(self, train: np.ndarray, vocab: dict, vectors: np.ndarray):
 
-    l_crops = []
-    for item in crops:
-        item = eval(item)
-        for i in item:
-            if i not in l_crops:
-                l_crops.append(i)
+        self.vocab = vocab
+        self.vectors = vectors
+        self.l_crops, self.l_diseases, self.l_medicines = self._build_lexi(train[:, 1:])
+        self.lv_corps = self._build_phrase_vectors(self.l_crops)
+        self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
+        self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
 
-    l_diseases = []
-    for item in diseases:
-        item = eval(item)
-        for i in item:
-            if i not in l_diseases:
-                l_diseases.append(i)
+    @staticmethod
+    def _build_lexi(data: np.ndarray) -> Tuple:
 
-    l_medicines = []
-    for item in medicines:
-        item = eval(item)
-        for i in item:
-            if i not in l_medicines:
-                l_medicines.append(i)
-    return l_crops, l_diseases, l_medicines
+        crops = data[:, 0]
+        diseases = data[:, 1]
+        medicines = data[:, 2]
 
+        l_crops = []
+        for item in crops:
+            item = eval(item)
+            for i in item:
+                if i not in l_crops:
+                    l_crops.append(i)
 
-def delete_symbol(entitys: list) -> list:
+        l_diseases = []
+        for item in diseases:
+            item = eval(item)
+            for i in item:
+                if i not in l_diseases:
+                    l_diseases.append(i)
 
-    pun = get_punctuation()
-    for in1, item in enumerate(entitys):
-        delete_index = []
-        for in2, entity in enumerate(item):
-            if len(entity) == 1:
-                delete_index.append(in2)
-            else:
-                entitys[in1][in2] = re.sub(pun, '', entitys[in1][in2])
-        entitys[in1] = np.delete(np.array(entitys[in1]), delete_index).tolist()
-    return entitys
+        l_medicines = []
+        for item in medicines:
+            item = eval(item)
+            for i in item:
+                if i not in l_medicines:
+                    l_medicines.append(i)
+        return l_crops, l_diseases, l_medicines
+
+    def _build_phrase_vectors(self, lexi: list) -> np.ndarray:
+
+        lexi_vector = []
+        for item in lexi:
+            lexi_vector.append(self._get_phrase_vector(item))
+
+        return np.array(lexi_vector)
+
+    def _delete_symbol(self, entitys: list) -> list:
+
+        pun = get_punctuation()
+        for in1, item in enumerate(entitys):
+            delete_index = []
+            for in2, entity in enumerate(item):
+                if len(entity) == 1:
+                    delete_index.append(in2)
+                else:
+                    entitys[in1][in2] = re.sub(pun, '', entitys[in1][in2])
+            entitys[in1] = np.delete(np.array(entitys[in1]), delete_index).tolist()
+        return entitys
+
+    def _get_phrase_vector(self, item: str):
+
+        vectors = []
+        for s in item:
+            vectors.append(self.vectors[self.vocab.get(s)])
+        vectors = np.array(vectors)
+
+        return np.mean(vectors, axis=0)
+
+    def _calculate_similarity(self, entity: str, vectors: np.ndarray) -> Tuple:
+
+        vector = self._get_phrase_vector(entity)
+        similar_matrix = (vectors.dot(vector[:, np.newaxis]) / (np.linalg.norm(vectors, axis=1, keepdims=True) *
+                                                               np.linalg.norm(vector))).reshape(-1)
+        top = np.argmax(similar_matrix)
+        return similar_matrix[top], top
+
+    def _correct_error_item(self, entitys: list, lexi: list, phrase_vectors: np.ndarray) -> list:
+
+        for in1, item in enumerate(entitys):
+            for in2, entity in enumerate(item):
+                if entity not in lexi:
+                    score, top = self._calculate_similarity(entity, phrase_vectors)
+                    t = lexi[top]
+                    if score > 0.99:
+                        entitys[in1][in2] = lexi[top]
+        return entitys
+
+    def _correct_error(self, entitys: list, index: int) -> list:
+        '''
+        :param entitys: object
+        :param index: 0: crops, 1: diseases, 2: medicines
+        :return: entitys
+        '''
+        if index == 0:
+            entitys = self._correct_error_item(entitys, self.l_crops, self.lv_corps)
+        elif index == 1:
+            entitys = self._correct_error_item(entitys, self.l_diseases, self.lv_diseases)
+        elif index == 2:
+            entitys = self._correct_error_item(entitys, self.l_medicines, self.lv_medicines)
+        else:
+            pass
+        return entitys
+
+    def forward(self, entitys: list, index: int) -> list:
+        entitys = self._delete_symbol(entitys)
+        entitys = self._correct_error(entitys, index)
+        return entitys
+
+    def __call__(self, *args, **kwargs):
+
+        return self.forward(*args, **kwargs)
 
 
 # ================================= main ================================= #
@@ -639,14 +721,21 @@ if __name__ == '__main__':
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1].tolist()
-    (l_crops, l_diseases, l_medicines) = build_lexi(train[:, 1:])
 
     VECTOR_SIZE = 150
     pre_train = True
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
+    TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels, len(train_seqs), USING_CRF)
+
+    test_l_ids = train_char_ids[TRAIN_LENGTH:]
+    test_l_labels = train_char_labels[TRAIN_LENGTH:]
+    train_char_labels = train_char_labels[:TRAIN_LENGTH]
+    train_char_ids = train_char_ids[:TRAIN_LENGTH]
+
+    post_process = PostProcess(train, vocab, vectors.copy())
 
     DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     TRAIN = 'TRAIN'
@@ -662,8 +751,14 @@ if __name__ == '__main__':
     EPOCH = 300
 
     # init model
-    model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS, pre_model=torch.from_numpy(vectors)).to(
-        DEVICE)
+    if USING_CRF:
+        model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
+                           pre_model=torch.from_numpy(vectors)).to(
+            DEVICE)
+    else:
+        model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
+                           pre_model=torch.from_numpy(vectors)).to(
+            DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
     # init criterion
@@ -674,13 +769,13 @@ if __name__ == '__main__':
         data_type_name=[TRAIN, VALID, TEST],
         batch_size=[BATCH_SIZE, 5000, 5000],
         fold_index=0,
-        train_length=len(train_seqs),
+        train_length=TRAIN_LENGTH,
         train_char_labels=train_char_labels,
         train_char_ids=train_char_ids,
         test_char_ids=test_char_ids,
     )
 
-    valid_seqs = np.array(train_seqs)[get_10_fold_index(0, len(train_seqs))[1]]
+    valid_seqs = np.array(train_seqs)[get_10_fold_index(0, TRAIN_LENGTH)[1]]
 
     print('begin training ......')
     fold_index = 0  # using 10-fold cross validation
@@ -688,20 +783,20 @@ if __name__ == '__main__':
         # training
         model.train()
         train_loss = 0
-        if (epoch + 1) % 10 == 0:
-            fold_index = (fold_index + 1) % 10
-            (train_dataloader, valid_dataloader) = get_data_loader(
-                root='',
-                data_type_name=[TRAIN, VALID, TEST],
-                batch_size=[BATCH_SIZE, 5000, 5000],
-                fold_index=fold_index,
-                train_length=len(train_seqs),
-                train_char_labels=train_char_labels,
-                train_char_ids=train_char_ids,
-                test_char_ids=test_char_ids,
-                test=False,
-            )
-            valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, len(train_seqs))[1]]
+        # if (epoch + 1) % 10 == 0:
+        #     fold_index = (fold_index + 1) % 10
+        #     (train_dataloader, valid_dataloader) = get_data_loader(
+        #         root='',
+        #         data_type_name=[TRAIN, VALID, TEST],
+        #         batch_size=[BATCH_SIZE, 5000, 5000],
+        #         fold_index=fold_index,
+        #         train_length=TRAIN_LENGTH,
+        #         train_char_labels=train_char_labels,
+        #         train_char_ids=train_char_ids,
+        #         test_char_ids=test_char_ids,
+        #         test=False,
+        #     )
+        #     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
         for index, batch in enumerate(train_dataloader):
             data, _ = tensorized(batch[:, 0], vocab)
             label, _ = tensorized(batch[:, 1], category_dict)
@@ -728,27 +823,27 @@ if __name__ == '__main__':
             output = model(data)
             pred = model.get_word_id(output, category_dict, lengths)
             valid_loss = model.caculate_loss(output, label, category_dict, criterion)
-            p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict),
-                                     true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
+            p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
+                                     true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
-        print('epoch: {}, train_loss: {}, valid_loss: {}, precision: {}, recall: {}, f1: {}'.
-              format(epoch, train_loss / len(train_dataloader), valid_loss, p, r, f))
+        print('epoch: {}, train_loss: {}, valid_loss: {}, f_acc: {}'.
+              format(epoch, train_loss / len(train_dataloader), valid_loss, f_acc))
 
     torch.save(model.state_dict(), './model.pkl')
-    # model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
-    # model.eval()
-    # with torch.no_grad():
-    #     batch = next(iter(valid_dataloader))
-    #     data, lengths = tensorized(batch[:, 0], vocab)
-    #     label, _ = tensorized(batch[:, 1], category_dict)
-    #     data, label = data.to(DEVICE), label.to(DEVICE)
-    #     output = model(data)
-    #     pred = model.get_word_id(output, category_dict, lengths)
-    #     valid_loss = model.caculate_loss(output, label, category_dict, criterion)
-    #     p, r, f = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict),
-    #                              true_labels=np.array(train)[get_10_fold_index(fold_index, len(train_seqs))[1], 1:])
-
+    model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
     # testing
+    model.eval()
+    with torch.no_grad():
+        data, lengths = tensorized(test_l_ids, vocab)
+        label, _ = tensorized(test_l_labels, category_dict)
+        data, label = data.to(DEVICE), label.to(DEVICE)
+        output = model(data)
+        pred = model.get_word_id(output, category_dict, lengths)
+        p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict, post_process=post_process),
+                                 true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
+        print('tset: f_acc: {}'.format(f_acc))
+
+    # work
     model.eval()
     with torch.no_grad():
         batch = next(iter(test_dataloader))
@@ -758,12 +853,6 @@ if __name__ == '__main__':
         output = model(data)
         pred = model.get_word_id(output, category_dict, lengths)
 
-        crops, diseases, medicines = drop_entity(pred, test_seqs, category_dict)
-        crops = delete_symbol(crops)
-        diseases = delete_symbol(diseases)
-        medicines = delete_symbol(medicines)
-        # crops = delete_symbol(crops)
-        # diseases = delete_symbol(diseases)
-        # medicines = delete_symbol(medicines)
+        crops, diseases, medicines = drop_entity(pred, test_seqs, category_dict, post_process=post_process)
         pd.DataFrame([test[:, 0], crops, diseases, medicines]).T. \
             to_csv('./result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
