@@ -18,9 +18,11 @@ import pandas as pd
 from torch.nn import LSTM
 from itertools import zip_longest
 from torch import Tensor
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
 from gensim.models import Word2Vec
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 from utils.utils import caculate_accuracy
 
@@ -88,7 +90,8 @@ def get_process_data(train: list) -> Tuple:
                 char_labels = char_labels + ['O' for i in range(len(word))]
             else:
                 char_labels.append('B_{}'.format(label))
-                char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 1)]
+                char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 2)]
+                char_labels.append('E_{}'.format(label))
 
         seq_data = ''
         for char in datas[:, 0]:
@@ -121,7 +124,7 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
     token = [char_split(i) for i in seq_datas]
     if use_word:
         token.insert(0, ['<pad>', '<start>', '<end>', '<unk>'])
-        model = Word2Vec(token, window=10, size=vector_size, min_count=0).wv
+        model = Word2Vec(token, window=15, size=vector_size, min_count=0).wv
         vocab = dict(
             [(key, value.index) for key, value in model.vocab.items()]
         )
@@ -152,7 +155,8 @@ def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int,
     )
     category_dict.update({'<pad>': len(category_dict)})
     category_dict.update({'<unk>': len(category_dict)})
-    category_dict.update({'<start>': len(category_dict)})
+    if crf:
+        category_dict.update({'<start>': len(category_dict)})
 
     def get_label_id(labels: list):
         ids = []
@@ -282,11 +286,13 @@ class BiLSTM(nn.Module):
         )
         self.out = nn.Linear(hidden_dim * 2, output_dim)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, lengths: list) -> Tensor:
 
         embeded = self.embedding(x)
-        output, hidden = self.rnn(embeded)
-        output = torch.softmax(self.out(output), dim=2)
+        packed = pack_padded_sequence(embeded, lengths, batch_first=True, enforce_sorted=False)
+        output, hidden = self.rnn(packed)
+        output, hidden = pad_packed_sequence(output, batch_first=True)
+        output = self.out(output)
         return output
 
     def caculate_loss(self, output: Tensor, target: Tensor, category_dict: dict, criterion=None) -> Tensor:
@@ -338,10 +344,12 @@ class BiLSTM_CRF(nn.Module):
         self.transition = nn.Parameter(
             torch.ones(output_dim, output_dim) * 1 / output_dim)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, lengths: list) -> Tensor:
 
         embeded = self.embedding(x)
-        output, hidden = self.rnn(embeded)
+        packed = pack_padded_sequence(embeded, lengths, batch_first=True, enforce_sorted=False)
+        output, hidden = self.rnn(packed)
+        output, hidden = pad_packed_sequence(output, batch_first=True)
         output = self.out(output)
         crf_scores = output.unsqueeze(
             2).expand(-1, -1, self.output_dim, -1) + self.transition.unsqueeze(0)
@@ -499,12 +507,15 @@ class BiLSTM_CRF(nn.Module):
 def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_process) -> Tuple:
     b_crop = category_dict['B_n_crop']
     i_crop = category_dict['I_n_crop']
+    e_crop = category_dict['E_n_crop']
     b_disease = category_dict['B_n_disease']
     i_disease = category_dict['I_n_disease']
+    e_disease = category_dict['E_n_disease']
     b_medicine = category_dict['B_n_medicine']
     i_medicine = category_dict['I_n_medicine']
+    e_medicine = category_dict['E_n_medicine']
 
-    def get_entity_id(seq_item: list, item: np.ndarray, b_e, i_e):
+    def get_entity_id(seq_item: list, item: np.ndarray, b_e, i_e, e_e):
         begin = np.where(item == b_e)[0]
         result = []
         if len(begin) == 0:
@@ -514,22 +525,37 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                 break
             seq = ''
             seq = seq + seq_item[j]
+            last_index = 0
             if j != len(item) - 1:
-                for k in range(j + 1, len(item)):
-                    if item[k] == i_e and k < len(seq_item):
+                for k in range(j + 1, len(seq_item)):
+                    if item[k] == i_e:
                         seq = seq + seq_item[k]
-                    else:
+                    elif item[k] == e_e:
+                        seq = seq + seq_item[k]
+                        last_index = k
                         break
-            result.append(seq)
+                    else:
+                        # 扩展一位，尽可能纠错
+                        if item[k + 1] == e_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                            seq = seq + seq_item[k + 1]
+                            last_index = k + 1
+                            break
+                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                        else:
+                            break
+            if item[last_index] == e_e:
+                result.append(seq)
         return result
 
     crops = []
     diseases = []
     medicines = []
     for index, item in enumerate(pred):
-        crops.append(get_entity_id(test_seqs[index], item, b_crop, i_crop))
-        diseases.append(get_entity_id(test_seqs[index], item, b_disease, i_disease))
-        medicines.append(get_entity_id(test_seqs[index], item, b_medicine, i_medicine))
+        crops.append(get_entity_id(test_seqs[index], item, b_crop, i_crop, e_crop))
+        diseases.append(get_entity_id(test_seqs[index], item, b_disease, i_disease, e_disease))
+        medicines.append(get_entity_id(test_seqs[index], item, b_medicine, i_medicine, e_medicine))
 
     return post_process(crops, 0), post_process(diseases, 1), post_process(medicines, 2)
 
@@ -685,7 +711,7 @@ class PostProcess:
                 if entity not in lexi:
                     score, top = self._calculate_similarity(entity, phrase_vectors)
                     t = lexi[top]
-                    if score > 0.99:
+                    if score > 0.9 if abs(len(t) - len(entity)) >= 2 else 0.99:
                         entitys[in1][in2] = lexi[top]
         return entitys
 
@@ -706,8 +732,8 @@ class PostProcess:
         return entitys
 
     def forward(self, entitys: list, index: int) -> list:
+        # entitys = self._correct_error(entitys, index)
         entitys = self._delete_symbol(entitys)
-        entitys = self._correct_error(entitys, index)
         return entitys
 
     def __call__(self, *args, **kwargs):
@@ -722,12 +748,42 @@ if __name__ == '__main__':
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1].tolist()
 
-    VECTOR_SIZE = 150
+    VECTOR_SIZE = 100
     pre_train = True
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
+
+    # token = token[:len(train_seqs)]
+    # train_data = token[:TRAIN_LENGTH - 100]
+    # train_label = train_char_labels[:TRAIN_LENGTH - 100]
+    # valid_data = token[TRAIN_LENGTH - 100:TRAIN_LENGTH + 100]
+    # valid_label = train_char_labels[TRAIN_LENGTH - 100:TRAIN_LENGTH + 100]
+    # test_data = token[TRAIN_LENGTH + 100:]
+    # test_label = train_char_labels[TRAIN_LENGTH + 100:]
+    #
+    # filename = './datas/train.txt'
+    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
+    #     for in1, item in enumerate(train_data):
+    #         for in2, entity in enumerate(item):
+    #             f.write("{} {}\n".format(entity, train_label[in1][in2]))
+    #         f.write("\n")
+    #
+    # filename = './datas/dev.txt'
+    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
+    #     for in1, item in enumerate(valid_data):
+    #         for in2, entity in enumerate(item):
+    #             f.write("{} {}\n".format(entity, valid_label[in1][in2]))
+    #         f.write("\n")
+    #
+    # filename = './datas/test.txt'
+    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
+    #     for in1, item in enumerate(test_data):
+    #         for in2, entity in enumerate(item):
+    #             f.write("{} {}\n".format(entity, test_label[in1][in2]))
+    #         f.write("\n")
+
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels, len(train_seqs), USING_CRF)
 
     test_l_ids = train_char_ids[TRAIN_LENGTH:]
@@ -741,14 +797,14 @@ if __name__ == '__main__':
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
-    HIDDEN_DIM = 64
+    HIDDEN_DIM = 128
     OUTPUT_SIZE = len(category_dict)
     BATCH_SIZE = 64
     EM_DIM = VECTOR_SIZE
     LR = 1e-2
     INPUT_SIZE = len(vocab)
     NUM_LAYERS = 1
-    EPOCH = 300
+    EPOCH = 30
 
     # init model
     if USING_CRF:
@@ -761,6 +817,7 @@ if __name__ == '__main__':
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
+    lr_s = StepLR(optim, step_size=10, gamma=0.95)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
@@ -778,9 +835,12 @@ if __name__ == '__main__':
     valid_seqs = np.array(train_seqs)[get_10_fold_index(0, TRAIN_LENGTH)[1]]
 
     print('begin training ......')
+    best_model = None
+    best_score = 0
     fold_index = 0  # using 10-fold cross validation
     for epoch in range(EPOCH):
         # training
+        lr_s.step()
         model.train()
         train_loss = 0
         # if (epoch + 1) % 10 == 0:
@@ -798,14 +858,14 @@ if __name__ == '__main__':
         #     )
         #     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
         for index, batch in enumerate(train_dataloader):
-            data, _ = tensorized(batch[:, 0], vocab)
+            data, lengths = tensorized(batch[:, 0], vocab)
             label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
 
             model.zero_grad()
             optim.zero_grad()
 
-            output = model(data)
+            output = model(data, lengths)
             loss = model.caculate_loss(output, label, category_dict, criterion)
 
             loss.backward()
@@ -820,16 +880,20 @@ if __name__ == '__main__':
             data, lengths = tensorized(batch[:, 0], vocab)
             label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
-            output = model(data)
+            output = model(data, lengths)
             pred = model.get_word_id(output, category_dict, lengths)
             valid_loss = model.caculate_loss(output, label, category_dict, criterion)
             p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
-        print('epoch: {}, train_loss: {}, valid_loss: {}, f_acc: {}'.
-              format(epoch, train_loss / len(train_dataloader), valid_loss, f_acc))
+            if best_score < f_acc:
+                best_score = f_acc
+                best_model = model.state_dict()
+        print('epoch: {}, train_loss: {:.4f}, valid_loss: {:.4f}, f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.
+              format(epoch, train_loss / len(train_dataloader), valid_loss, f_acc, p, r, f))
 
-    torch.save(model.state_dict(), './model.pkl')
+    print('best_score: {:.3f}'.format(best_score))
+    torch.save(best_model, './model.pkl')
     model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
     # testing
     model.eval()
@@ -837,11 +901,11 @@ if __name__ == '__main__':
         data, lengths = tensorized(test_l_ids, vocab)
         label, _ = tensorized(test_l_labels, category_dict)
         data, label = data.to(DEVICE), label.to(DEVICE)
-        output = model(data)
+        output = model(data, lengths)
         pred = model.get_word_id(output, category_dict, lengths)
         p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict, post_process=post_process),
                                  true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
-        print('tset: f_acc: {}'.format(f_acc))
+        print('tset: f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.format(f_acc, p, r, f))
 
     # work
     model.eval()
@@ -850,7 +914,7 @@ if __name__ == '__main__':
         data, lengths = tensorized(batch, vocab)
         data = data.to(DEVICE)
 
-        output = model(data)
+        output = model(data, lengths)
         pred = model.get_word_id(output, category_dict, lengths)
 
         crops, diseases, medicines = drop_entity(pred, test_seqs, category_dict, post_process=post_process)
