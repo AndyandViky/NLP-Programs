@@ -131,8 +131,19 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
         vectors = model.vectors
         return vocab, token[1:], vectors
     else:
-        vocab = {}
-        return vocab, token[1:], None
+        char_words = []
+        for seq in seq_datas:
+            for char in seq:
+                if char not in char_words:
+                    char_words.append(char)
+        vocab = dict(
+            [(char, index) for index, char in enumerate(char_words)]
+        )
+        vocab.update({'<pad>': len(vocab)})
+        vocab.update({'<unk>': len(vocab)})
+        vocab.update({'<start>': len(vocab)})
+        vocab.update({'<end>': len(vocab)})
+        return vocab, token, []
 
 
 def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int, crf: bool = False) -> Tuple:
@@ -628,14 +639,15 @@ def tensorized(batch: list, map: dict) -> Tuple:
 
 class PostProcess:
 
-    def __init__(self, train: np.ndarray, vocab: dict, vectors: np.ndarray):
+    def __init__(self, train: np.ndarray, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
 
-        self.vocab = vocab
-        self.vectors = vectors
-        self.l_crops, self.l_diseases, self.l_medicines = self._build_lexi(train[:, 1:])
-        self.lv_corps = self._build_phrase_vectors(self.l_crops)
-        self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
-        self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
+        if pre_train:
+            self.vocab = vocab
+            self.vectors = vectors
+            self.l_crops, self.l_diseases, self.l_medicines = self._build_lexi(train[:, 1:])
+            self.lv_corps = self._build_phrase_vectors(self.l_crops)
+            self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
+            self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
 
     @staticmethod
     def _build_lexi(data: np.ndarray) -> Tuple:
@@ -711,7 +723,7 @@ class PostProcess:
                 if entity not in lexi:
                     score, top = self._calculate_similarity(entity, phrase_vectors)
                     t = lexi[top]
-                    if score > 0.9 if abs(len(t) - len(entity)) >= 2 else 0.99:
+                    if score > 0.99:
                         entitys[in1][in2] = lexi[top]
         return entitys
 
@@ -732,8 +744,8 @@ class PostProcess:
         return entitys
 
     def forward(self, entitys: list, index: int) -> list:
-        # entitys = self._correct_error(entitys, index)
         entitys = self._delete_symbol(entitys)
+        # entitys = self._correct_error(entitys, index)
         return entitys
 
     def __call__(self, *args, **kwargs):
@@ -748,8 +760,8 @@ if __name__ == '__main__':
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1].tolist()
 
-    VECTOR_SIZE = 100
-    pre_train = True
+    VECTOR_SIZE = 128
+    pre_train = False
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
@@ -791,7 +803,7 @@ if __name__ == '__main__':
     train_char_labels = train_char_labels[:TRAIN_LENGTH]
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
-    post_process = PostProcess(train, vocab, vectors.copy())
+    post_process = PostProcess(train, vocab, vectors.copy(), pre_train)
 
     DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     TRAIN = 'TRAIN'
@@ -805,19 +817,20 @@ if __name__ == '__main__':
     INPUT_SIZE = len(vocab)
     NUM_LAYERS = 1
     EPOCH = 30
+    pre_model = torch.from_numpy(vectors) if pre_train else None
 
     # init model
     if USING_CRF:
         model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
-                           pre_model=torch.from_numpy(vectors)).to(
+                           pre_model=pre_model).to(
             DEVICE)
     else:
         model = BiLSTM(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
-                           pre_model=torch.from_numpy(vectors)).to(
+                           pre_model=pre_model).to(
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-    lr_s = StepLR(optim, step_size=10, gamma=0.95)
+    lr_s = StepLR(optim, step_size=10, gamma=0.5)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
@@ -840,10 +853,9 @@ if __name__ == '__main__':
     fold_index = 0  # using 10-fold cross validation
     for epoch in range(EPOCH):
         # training
-        lr_s.step()
         model.train()
         train_loss = 0
-        # if (epoch + 1) % 10 == 0:
+        # if (epoch + 1) % 2 == 0:
         #     fold_index = (fold_index + 1) % 10
         #     (train_dataloader, valid_dataloader) = get_data_loader(
         #         root='',
@@ -872,7 +884,7 @@ if __name__ == '__main__':
             optim.step()
 
             train_loss += loss.item()
-
+        lr_s.step()
         # validation
         model.eval()
         with torch.no_grad():
