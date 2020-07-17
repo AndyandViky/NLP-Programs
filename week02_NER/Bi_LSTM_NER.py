@@ -296,10 +296,11 @@ class BiLSTM(nn.Module):
             batch_first=True,
         )
         self.out = nn.Linear(hidden_dim * 2, output_dim)
+        self.dropout = nn.Dropout(0.5)
 
     def forward(self, x: Tensor, lengths: list) -> Tensor:
 
-        embeded = self.embedding(x)
+        embeded = self.dropout(self.embedding(x))
         packed = pack_padded_sequence(embeded, lengths, batch_first=True, enforce_sorted=False)
         output, hidden = self.rnn(packed)
         output, hidden = pad_packed_sequence(output, batch_first=True)
@@ -830,7 +831,7 @@ if __name__ == '__main__':
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-    lr_s = StepLR(optim, step_size=10, gamma=0.5)
+    lr_s = StepLR(optim, step_size=10, gamma=0.1)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
