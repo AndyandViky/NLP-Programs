@@ -638,6 +638,151 @@ def tensorized(batch: list, map: dict) -> Tuple:
     return batch_tensor, lengths
 
 
+def build_lexi(data: np.ndarray) -> Tuple:
+
+    crops = data[:, 0]
+    diseases = data[:, 1]
+    medicines = data[:, 2]
+
+    l_crops = []
+    l_crops_c = []
+    for item in crops:
+        item = eval(item)
+        for i in item:
+            if i not in l_crops:
+                l_crops.append(i)
+                l_crops_c.append(1)
+            else:
+                index = l_crops.index(i)
+                l_crops_c[index] += 1
+
+    l_diseases = []
+    l_diseases_c = []
+    for item in diseases:
+        item = eval(item)
+        for i in item:
+            if i not in l_diseases:
+                l_diseases.append(i)
+                l_diseases_c.append(1)
+            else:
+                index = l_diseases.index(i)
+                l_diseases_c[index] += 1
+
+    l_medicines = []
+    l_medicines_c = []
+    for item in medicines:
+        item = eval(item)
+        for i in item:
+            if i not in l_medicines:
+                l_medicines.append(i)
+                l_medicines_c.append(1)
+            else:
+                index = l_medicines.index(i)
+                l_medicines_c[index] += 1
+
+    l_crops = dict(
+        [(key, value) for key, value in zip(l_crops, l_crops_c)]
+    )
+    l_diseases = dict(
+        [(key, value) for key, value in zip(l_diseases, l_diseases_c)]
+    )
+    l_medicines = dict(
+        [(key, value) for key, value in zip(l_medicines, l_medicines_c)]
+    )
+    return l_crops, l_diseases, l_medicines
+
+
+def change_lexi2dict(lexi: Tuple, vocab: dict, vectors: np.ndarray) -> dict:
+
+    lexi = dict(lexi[0], **lexi[1], **lexi[2])
+
+    def _get_phrase_vector(item: str) -> np.ndarray:
+
+        vector = []
+        for s in item:
+            vector.append(vectors[vocab.get(s)])
+        vector = np.array(vector)
+
+        return np.mean(vector, axis=0)
+
+    words = ''
+    for item in lexi.keys():
+        words = words + item
+
+    uword = []
+    for word in words:
+        if word not in uword:
+            uword.append(word)
+
+    word_dict = dict()
+    for word in uword:
+        re = []
+        rev = []
+        for (item, count) in lexi.items():
+            if item.find(word) != -1:
+                re.append({
+                    'item': item,
+                    'count': count
+                })
+                rev.append(_get_phrase_vector(item))
+        word_dict.update({word: {
+            'r_words': re,
+            'r_words_v': rev,
+            'count': len(re),
+        }})
+
+    return word_dict
+
+
+def add_lexi_infomation(lexi_dict: dict, vocab: dict, vectors: np.ndarray) -> np.ndarray:
+
+    def get_weight_index(key: str, value: dict, type='B') -> np.ndarray:
+
+        r_words = np.array(value.get('r_words'))
+        r_words_v = np.array(value.get('r_words_v'))
+
+        if type == 'B':
+            v_index = []
+            for index, item in enumerate(r_words):
+                if key == item['item'][0]:
+                    v_index.append(index)
+            v_count = np.array([item['count'] for item in r_words[v_index]]).reshape((-1, 1))
+            vector = np.sum(v_count * r_words_v[v_index], axis=0)
+        elif type == 'I':
+            v_index = []
+            for index, item in enumerate(r_words):
+                if len(item['item']) > 2 and key != item['item'][0] and key != item['item'][-1]:
+                    v_index.append(index)
+            v_count = np.array([item['count'] for item in r_words[v_index]]).reshape((-1, 1))
+            vector = np.sum(v_count * r_words_v[v_index], axis=0)
+        elif type == 'E':
+            v_index = []
+            for index, item in enumerate(r_words):
+                if key == item['item'][-1]:
+                    v_index.append(index)
+            v_count = np.array([item['count'] for item in r_words[v_index]]).reshape((-1, 1))
+            vector = np.sum(v_count * r_words_v[v_index], axis=0)
+
+        return vector
+
+    _vectors = np.zeros((vectors.shape[0], 2 * vectors.shape[1]))
+    _vectors[:, :vectors.shape[1]] = vectors
+    for key, value in lexi_dict.items():
+        # combine word information
+        total_count = 0
+        for item in value.get('r_words'):
+            total_count += item['count']
+        b_v = get_weight_index(key, value, type='B')
+        I_v = get_weight_index(key, value, type='I')
+        E_v = get_weight_index(key, value, type='E')
+        word_weight_vector = b_v + I_v + E_v
+        word_weight_vector = word_weight_vector / total_count
+
+        id = vocab.get(key)
+        _vectors[id, vectors.shape[1]:] = word_weight_vector
+    return _vectors.astype(np.float32)
+
+
 class PostProcess:
 
     def __init__(self, train: np.ndarray, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
@@ -645,39 +790,10 @@ class PostProcess:
         if pre_train:
             self.vocab = vocab
             self.vectors = vectors
-            self.l_crops, self.l_diseases, self.l_medicines = self._build_lexi(train[:, 1:])
+            self.l_crops, self.l_diseases, self.l_medicines = build_lexi(train[:, 1:])
             self.lv_corps = self._build_phrase_vectors(self.l_crops)
             self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
             self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
-
-    @staticmethod
-    def _build_lexi(data: np.ndarray) -> Tuple:
-
-        crops = data[:, 0]
-        diseases = data[:, 1]
-        medicines = data[:, 2]
-
-        l_crops = []
-        for item in crops:
-            item = eval(item)
-            for i in item:
-                if i not in l_crops:
-                    l_crops.append(i)
-
-        l_diseases = []
-        for item in diseases:
-            item = eval(item)
-            for i in item:
-                if i not in l_diseases:
-                    l_diseases.append(i)
-
-        l_medicines = []
-        for item in medicines:
-            item = eval(item)
-            for i in item:
-                if i not in l_medicines:
-                    l_medicines.append(i)
-        return l_crops, l_diseases, l_medicines
 
     def _build_phrase_vectors(self, lexi: list) -> np.ndarray:
 
@@ -762,12 +878,17 @@ if __name__ == '__main__':
     test_seqs = test[:, 1].tolist()
 
     VECTOR_SIZE = 128
-    pre_train = False
+    pre_train = True
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
 
+    if pre_train:
+        lexi = build_lexi(train[:, 1:])
+        lexi_dict = change_lexi2dict(lexi, vocab, vectors.copy())
+        vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
+        VECTOR_SIZE = vectors.shape[1]
     # token = token[:len(train_seqs)]
     # train_data = token[:TRAIN_LENGTH - 100]
     # train_label = train_char_labels[:TRAIN_LENGTH - 100]
@@ -810,7 +931,7 @@ if __name__ == '__main__':
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
-    HIDDEN_DIM = 128
+    HIDDEN_DIM = 320
     OUTPUT_SIZE = len(category_dict)
     BATCH_SIZE = 64
     EM_DIM = VECTOR_SIZE
