@@ -129,7 +129,7 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
             [(key, value.index) for key, value in model.vocab.items()]
         )
         vectors = model.vectors
-        return vocab, token[1:], vectors
+        return vocab, token[1:], vectors, model.vocab
     else:
         char_words = []
         for seq in seq_datas:
@@ -143,7 +143,7 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
         vocab.update({'<unk>': len(vocab)})
         vocab.update({'<start>': len(vocab)})
         vocab.update({'<end>': len(vocab)})
-        return vocab, token, []
+        return vocab, token, [], []
 
 
 def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int, crf: bool = False) -> Tuple:
@@ -699,11 +699,13 @@ def change_lexi2dict(lexi: Tuple, vocab: dict, vectors: np.ndarray) -> dict:
     def _get_phrase_vector(item: str) -> np.ndarray:
 
         vector = []
+        count = 0
         for s in item:
-            vector.append(vectors[vocab.get(s)])
+            vector.append(vectors[vocab.get(s).index] * vocab.get(s).count)
+            count += vocab.get(s).count
         vector = np.array(vector)
-
-        return np.mean(vector, axis=0)
+        vector = np.sum(vector, axis=0) / count
+        return vector
 
     words = ''
     for item in lexi.keys():
@@ -791,6 +793,7 @@ class PostProcess:
             self.vocab = vocab
             self.vectors = vectors
             self.l_crops, self.l_diseases, self.l_medicines = build_lexi(train[:, 1:])
+            self.l_crops, self.l_diseases, self.l_medicines = list(self.l_crops.keys()), list(self.l_diseases.keys()), list(self.l_medicines.keys())
             self.lv_corps = self._build_phrase_vectors(self.l_crops)
             self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
             self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
@@ -882,11 +885,11 @@ if __name__ == '__main__':
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
-    vocab, token, vectors = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
+    vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
 
     if pre_train:
         lexi = build_lexi(train[:, 1:])
-        lexi_dict = change_lexi2dict(lexi, vocab, vectors.copy())
+        lexi_dict = change_lexi2dict(lexi, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
     # token = token[:len(train_seqs)]
@@ -938,7 +941,7 @@ if __name__ == '__main__':
     LR = 1e-2
     INPUT_SIZE = len(vocab)
     NUM_LAYERS = 1
-    EPOCH = 30
+    EPOCH = 50
     pre_model = torch.from_numpy(vectors) if pre_train else None
 
     # init model
@@ -952,7 +955,7 @@ if __name__ == '__main__':
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-    lr_s = StepLR(optim, step_size=10, gamma=0.1)
+    lr_s = StepLR(optim, step_size=20, gamma=0.1)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
@@ -1020,7 +1023,7 @@ if __name__ == '__main__':
             p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
-            if best_score < f_acc:
+            if best_score <= f_acc:
                 best_score = f_acc
                 best_model = model.state_dict()
         print('epoch: {}, train_loss: {:.4f}, valid_loss: {:.4f}, f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.
