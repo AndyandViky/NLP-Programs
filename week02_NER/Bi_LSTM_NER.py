@@ -24,8 +24,6 @@ from typing import Tuple
 from gensim.models import Word2Vec
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
-from utils.utils import caculate_accuracy
-
 
 def get_punctuation() -> str:
 
@@ -692,11 +690,28 @@ def build_lexi(data: np.ndarray) -> Tuple:
     return l_crops, l_diseases, l_medicines
 
 
-def change_lexi2dict(lexi: Tuple, vocab: dict, vectors: np.ndarray) -> dict:
+def build_word(word_datas: np.ndarray) -> Tuple:
+
+    words = []
+    for item in word_datas:
+        word = item[:, 0]
+        words.append(word.tolist())
+
+    model = Word2Vec(words, size=128, window=5, min_count=0).wv
+    word_vector = model.vectors
+    vocab = model.vocab
+
+    return word_vector, vocab
+
+
+def change_lexi2dict(lexi: Tuple, ex_vocab: dict, ex_vectors: np.ndarray, vocab: dict, vectors: np.ndarray) -> dict:
 
     lexi = dict(lexi[0], **lexi[1], **lexi[2])
 
     def _get_phrase_vector(item: str) -> np.ndarray:
+
+        index = ex_vocab.get(item).index
+        ex_vector = ex_vectors[index]
 
         vector = []
         count = 0
@@ -705,6 +720,7 @@ def change_lexi2dict(lexi: Tuple, vocab: dict, vectors: np.ndarray) -> dict:
             count += vocab.get(s).count
         vector = np.array(vector)
         vector = np.sum(vector, axis=0) / count
+
         return vector
 
     words = ''
@@ -889,7 +905,8 @@ if __name__ == '__main__':
 
     if pre_train:
         lexi = build_lexi(train[:, 1:])
-        lexi_dict = change_lexi2dict(lexi, r_vocab, vectors.copy())
+        word_vector, word_vocab = build_word(word_datas)
+        lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
     # token = token[:len(train_seqs)]
@@ -959,23 +976,24 @@ if __name__ == '__main__':
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
+    print(1)
+    fold_index = 0  # using 10-fold cross validation 5
     (train_dataloader, valid_dataloader, test_dataloader) = get_data_loader(
         root='',
         data_type_name=[TRAIN, VALID, TEST],
         batch_size=[BATCH_SIZE, 5000, 5000],
-        fold_index=0,
+        fold_index=fold_index,
         train_length=TRAIN_LENGTH,
         train_char_labels=train_char_labels,
         train_char_ids=train_char_ids,
         test_char_ids=test_char_ids,
     )
 
-    valid_seqs = np.array(train_seqs)[get_10_fold_index(0, TRAIN_LENGTH)[1]]
+    valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     print('begin training ......')
     best_model = None
     best_score = 0
-    fold_index = 0  # using 10-fold cross validation
     for epoch in range(EPOCH):
         # training
         model.train()
@@ -1023,7 +1041,7 @@ if __name__ == '__main__':
             p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
-            if best_score <= f_acc:
+            if best_score < f_acc:
                 best_score = f_acc
                 best_model = model.state_dict()
         print('epoch: {}, train_loss: {:.4f}, valid_loss: {:.4f}, f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.
