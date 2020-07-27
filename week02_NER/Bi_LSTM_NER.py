@@ -21,6 +21,7 @@ from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
+from xpinyin import Pinyin
 from gensim.models import Word2Vec
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
@@ -697,20 +698,35 @@ def build_word(word_datas: np.ndarray) -> Tuple:
         word = item[:, 0]
         words.append(word.tolist())
 
-    model = Word2Vec(words, size=128, window=5, min_count=0).wv
+    model = Word2Vec(words, size=128, window=10, min_count=0).wv
     word_vector = model.vectors
     vocab = model.vocab
 
     return word_vector, vocab
 
 
+def build_word_pinyin(word_datas: np.ndarray) -> Tuple:
+
+    pinyin = Pinyin()
+    words = []
+    for item in word_datas:
+        word = item[:, 0]
+        py = [pinyin.get_pinyin(p, '') for p in word.tolist()]
+        words.append(py)
+    model = Word2Vec(words, size=128, window=10, min_count=0).wv
+    pinyin_vector = model.vectors
+    pinyin_vocab = model.vocab
+
+    return pinyin_vector, pinyin_vocab
+
+
 def change_lexi2dict(lexi: Tuple, ex_vocab: dict, ex_vectors: np.ndarray, vocab: dict, vectors: np.ndarray) -> dict:
 
     lexi = dict(lexi[0], **lexi[1], **lexi[2])
-
+    pinyin = Pinyin()
     def _get_phrase_vector(item: str) -> np.ndarray:
 
-        index = ex_vocab.get(item).index
+        index = ex_vocab.get(pinyin.get_pinyin(item, '')).index
         ex_vector = ex_vectors[index]
 
         vector = []
@@ -906,7 +922,8 @@ if __name__ == '__main__':
     if pre_train:
         lexi = build_lexi(train[:, 1:])
         word_vector, word_vocab = build_word(word_datas)
-        lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
+        pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
+        lexi_dict = change_lexi2dict(lexi, pinyin_vocab, pinyin_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
     # token = token[:len(train_seqs)]
