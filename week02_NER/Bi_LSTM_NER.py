@@ -24,6 +24,7 @@ from typing import Tuple
 from xpinyin import Pinyin
 from gensim.models import Word2Vec
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from sklearn.metrics import confusion_matrix, classification_report
 
 
 def get_punctuation() -> str:
@@ -62,11 +63,11 @@ def get_process_data(train: list) -> Tuple:
         #             delete_index.append(ind)
         # datas = np.delete(datas, delete_index, axis=0)
         # 623, 2081, 2516
-        if index == 623:
+        if index == 623 + 400:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081:
+        if index == 2081 + 400:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516:
+        if index == 2516 + 400:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         keys = datas[:, 1]
@@ -726,18 +727,19 @@ def change_lexi2dict(lexi: Tuple, ex_vocab: dict, ex_vectors: np.ndarray, vocab:
     pinyin = Pinyin()
     def _get_phrase_vector(item: str) -> np.ndarray:
 
-        index = ex_vocab.get(pinyin.get_pinyin(item, '')).index
+        index = ex_vocab.get(item).index
         ex_vector = ex_vectors[index]
 
         vector = []
         count = 0
         for s in item:
-            vector.append(vectors[vocab.get(s).index] * vocab.get(s).count)
+            # vector.append(vectors[vocab.get(s).index] * vocab.get(s).count)
             count += vocab.get(s).count
+            vector.append(vectors[vocab.get(s).index])
         vector = np.array(vector)
-        vector = np.sum(vector, axis=0) / count
+        vector = np.mean(vector, axis=0)
 
-        return vector
+        return vector + ex_vector
 
     words = ''
     for item in lexi.keys():
@@ -909,6 +911,20 @@ class PostProcess:
 if __name__ == '__main__':
 
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
+    crops = ['一辣椒', '大蒜', '三辣椒', '二辣椒', '番茄', '草莓', '西红柿']
+    insert_index = []
+    for index, item in enumerate(train):
+        has_crop = False
+        for j in crops:
+            if item[0].find(j) != -1:
+                has_crop = True
+                break
+        if has_crop:
+            insert_index.append(index)
+    copy_crops = np.repeat(train[insert_index], 50, axis=0)
+    for item in copy_crops:
+        train = np.insert(train, 0, item, axis=0)
+
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1].tolist()
 
@@ -923,7 +939,7 @@ if __name__ == '__main__':
         lexi = build_lexi(train[:, 1:])
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
-        lexi_dict = change_lexi2dict(lexi, pinyin_vocab, pinyin_vector, r_vocab, vectors.copy())
+        lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
     # token = token[:len(train_seqs)]
@@ -993,7 +1009,6 @@ if __name__ == '__main__':
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
-    print(1)
     fold_index = 0  # using 10-fold cross validation 5
     (train_dataloader, valid_dataloader, test_dataloader) = get_data_loader(
         root='',
@@ -1058,7 +1073,7 @@ if __name__ == '__main__':
             p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
-            if best_score < f_acc:
+            if best_score <= f_acc:
                 best_score = f_acc
                 best_model = model.state_dict()
         print('epoch: {}, train_loss: {:.4f}, valid_loss: {:.4f}, f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.
@@ -1077,6 +1092,8 @@ if __name__ == '__main__':
         pred = model.get_word_id(output, category_dict, lengths)
         p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict, post_process=post_process),
                                  true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
+        print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
+        print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
         print('tset: f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.format(f_acc, p, r, f))
 
     # work
