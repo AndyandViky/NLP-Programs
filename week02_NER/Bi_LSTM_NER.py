@@ -64,11 +64,11 @@ def get_process_data(train: list) -> Tuple:
         #             delete_index.append(ind)
         # datas = np.delete(datas, delete_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 400:
+        if index == 623 + 270:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 400:
+        if index == 2081 + 270:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 400:
+        if index == 2516 + 270:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         keys = datas[:, 1]
@@ -822,7 +822,7 @@ def add_lexi_infomation(lexi_dict: dict, vocab: dict, vectors: np.ndarray) -> np
 
 class PostProcess:
 
-    def __init__(self, train: np.ndarray, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
+    def __init__(self, train: np.ndarray, test: list, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
 
         if pre_train:
             self.vocab = vocab
@@ -832,6 +832,44 @@ class PostProcess:
             self.lv_corps = self._build_phrase_vectors(self.l_crops)
             self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
             self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
+
+            self.lexi_result = self._get_result_from_lexi(test)
+
+    def _get_result_from_lexi(self, test: list) -> Tuple:
+
+        te_crops = []
+        te_diseases = []
+        te_medicines = []
+
+        for t in test:
+            t_crops = []
+            for crop in self.l_crops:
+                index = find_all(t, crop)
+                if isinstance(index, int):
+                    continue
+                for item in index:
+                    t_crops.append(t[item:item + len(crop)])
+            te_crops.append(t_crops)
+
+            t_diseases = []
+            for disease in self.l_diseases:
+                index = find_all(t, disease)
+                if isinstance(index, int):
+                    continue
+                for item in index:
+                    t_diseases.append(t[item:item + len(disease)])
+            te_diseases.append(t_diseases)
+
+            t_medicines = []
+            for medicine in self.l_medicines:
+                index = find_all(t, medicine)
+                if isinstance(index, int):
+                    continue
+                for item in index:
+                    t_medicines.append(t[item:item + len(medicine)])
+            te_medicines.append(t_medicines)
+
+        return te_crops, te_diseases, te_medicines
 
     def _build_phrase_vectors(self, lexi: list) -> np.ndarray:
 
@@ -961,11 +999,47 @@ def get_wiki_bc(vocab: list) -> np.ndarray:
     return vectors
 
 
+def find_all(source: str, dest: str) -> list:
+
+    length1, length2 = len(source), len(dest)
+    dest_list = []
+    temp_list = []
+    if length1 < length2:
+        return -1
+    i = 0
+    while i <= length1-length2:
+        if source[i] == dest[0]:
+            dest_list.append(i)
+        i += 1
+    if dest_list == []:
+        return -1
+    for x in dest_list:
+        # print("Now x is:%d. Slice string is :%s" % (x, repr(source[x:x+length2])), end=" ")
+        if source[x:x+length2] != dest:
+            # print(" dest != slice")
+            temp_list.append(x)
+        else:
+            pass
+            # print(" dest == slice")
+    for x in temp_list:
+        dest_list.remove(x)
+    return dest_list
+
+
 # ================================= main ================================= #
 if __name__ == '__main__':
 
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
-    crops = ['一辣椒', '大蒜', '三辣椒', '二辣椒', '番茄', '草莓', '西红柿']
+    test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
+    test_seqs = test[:, 1].tolist()
+    lexi = build_lexi(train[:, 1:])
+
+    # ======================== enhance data ========================= #
+    crops = ['大蒜', '番茄', '草莓', '西红柿']
+    diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:10]
+    diseases = ['高温烫伤', '蚧壳虫', '立枯病', '条斑病毒病', '缺少硼', '烂根', '高等真菌', '阔叶杂草', '低温冻害', '地下害虫', '蔓枯病', '烟青虫', '一茶黄螨', '土传病害', '花叶病', '斜纹夜蛾', '污病', '抗病品种', '根结线虫', '高温烧烤', '斑潜蝇', '抗病能力', '蜗牛危害', '小叶病', '抗病威', '病情严重']
+    medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:30]
+    medicines = ['烯唑醇', '乙嘧酚', '菊酯类农药', '硫磺', '壬菌铜', '平衡肥', '铜制剂', '乙醚酚', '核苷酸', '苯菌灵', '波尔多液', '吲哚乙酸', '微乳剂', '虫酰肼', '氟啶脲', '印楝素', '鱼藤酮', '药剂副作用', '天然芸苔素内酯', '流体钙', '阿维炔螨特', '十烯酰吗啉', '藜芦碱', '多杀霉素', '苯氧威', '扑海因', '虱螨脲']
     insert_index = []
     for index, item in enumerate(train):
         has_crop = False
@@ -975,12 +1049,25 @@ if __name__ == '__main__':
                 break
         if has_crop:
             insert_index.append(index)
-    copy_crops = np.repeat(train[insert_index], 50, axis=0)
-    for item in copy_crops:
+    for index, item in enumerate(train):
+        has_disease = False
+        for j in diseases:
+            if item[0].find(j) != -1:
+                has_disease = True
+                break
+        if has_disease and index not in insert_index:
+            insert_index.append(index)
+    for index, item in enumerate(train):
+        has_medicine = False
+        for j in medicines:
+            if item[0].find(j) != -1:
+                has_medicine = True
+                break
+        if has_medicine and index not in insert_index:
+            insert_index.append(index)
+    enhance_part = np.repeat(train[insert_index], 5, axis=0)
+    for item in enhance_part:
         train = np.insert(train, 0, item, axis=0)
-
-    test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
-    test_seqs = test[:, 1].tolist()
 
     VECTOR_SIZE = 128
     pre_train = True
@@ -996,12 +1083,14 @@ if __name__ == '__main__':
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
         vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
-        lexi = build_lexi(train[:, 1:])
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
+
+    fold_index = 9  # using 10-fold cross validation 5
+    valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
     # token = token[:len(train_seqs)]
     # train_data = token[:TRAIN_LENGTH - 100]
     # train_label = train_char_labels[:TRAIN_LENGTH - 100]
@@ -1038,7 +1127,7 @@ if __name__ == '__main__':
     train_char_labels = train_char_labels[:TRAIN_LENGTH]
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
-    post_process = PostProcess(train, vocab, vectors.copy(), pre_train)
+    post_process = PostProcess(train, test_seqs, vocab, vectors.copy(), pre_train)
 
     DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     TRAIN = 'TRAIN'
@@ -1068,7 +1157,6 @@ if __name__ == '__main__':
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
-    fold_index = 0  # using 10-fold cross validation 5
     (train_dataloader, valid_dataloader, test_dataloader) = get_data_loader(
         root='',
         data_type_name=[TRAIN, VALID, TEST],
@@ -1079,8 +1167,6 @@ if __name__ == '__main__':
         train_char_ids=train_char_ids,
         test_char_ids=test_char_ids,
     )
-
-    valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     print('begin training ......')
     best_model = None
