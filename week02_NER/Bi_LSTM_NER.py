@@ -14,6 +14,7 @@ import string
 import torch
 import torch.nn as nn
 import pandas as pd
+import scipy.io as scio
 
 from torch.nn import LSTM
 from itertools import zip_longest
@@ -739,7 +740,7 @@ def change_lexi2dict(lexi: Tuple, ex_vocab: dict, ex_vectors: np.ndarray, vocab:
         vector = np.array(vector)
         vector = np.mean(vector, axis=0)
 
-        return vector + ex_vector
+        return vector
 
     words = ''
     for item in lexi.keys():
@@ -907,6 +908,59 @@ class PostProcess:
         return self.forward(*args, **kwargs)
 
 
+def get_wiki_vectors(vocab: list) -> np.ndarray:
+
+    raw = open('{}/newsblogbbs.vec'.format(DATA_DIR))
+    line = raw.readline()
+    vectors = np.zeros((len(vocab), 200))
+    count = 0
+    while True:
+        line = raw.readline()
+        if line == '':
+            break
+        line = line.split(' ')
+        if line[0] in vocab[4:]:
+            count += 1
+            vectors[vocab.index(line[0])] = np.array(line[1:-1], dtype=np.float32)
+            if count == len(vocab) - 4:
+                break
+
+    scio.savemat('{}/w2v_wiki.mat'.format(DATA_DIR), {'vectors': vectors})
+    return vectors
+
+
+def get_elmo_vector(vocab: list) -> np.ndarray:
+
+    from elmoformanylangs import Embedder
+    e = Embedder('{}/zhs.model'.format(DATA_DIR))
+
+    vectors = np.zeros((len(vocab), 1024))
+    vectors[4:] = e.sents2elmo(vocab[4:])
+    scio.savemat('{}/elmo.mat'.format(DATA_DIR), {'vectors': vectors})
+    return vectors
+
+
+def get_wiki_bc(vocab: list) -> np.ndarray:
+
+    raw = open('{}/w2v_wiki.bigram-char'.format(DATA_DIR))
+    line = raw.readline()
+    vectors = np.zeros((len(vocab), 300))
+    count = 0
+    while True:
+        line = raw.readline()
+        if line == '':
+            break
+        line = line.split(' ')
+        if line[0] in vocab[4:]:
+            count += 1
+            vectors[vocab.index(line[0])] = np.array(line[1:-1], dtype=np.float32)
+            if count == len(vocab) - 4:
+                break
+
+    scio.savemat('{}/w2v_wiki_bc.mat'.format(DATA_DIR), {'vectors': vectors})
+    return vectors
+
+
 # ================================= main ================================= #
 if __name__ == '__main__':
 
@@ -934,8 +988,14 @@ if __name__ == '__main__':
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
-
     if pre_train:
+        # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
+        # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
+        # wiki_bc_vectors = get_wiki_bc(list(vocab.keys()))
+        elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
+        wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
+        wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
+        vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
         lexi = build_lexi(train[:, 1:])
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
@@ -993,7 +1053,6 @@ if __name__ == '__main__':
     NUM_LAYERS = 1
     EPOCH = 50
     pre_model = torch.from_numpy(vectors) if pre_train else None
-
     # init model
     if USING_CRF:
         model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
