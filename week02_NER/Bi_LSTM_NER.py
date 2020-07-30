@@ -64,11 +64,11 @@ def get_process_data(train: list) -> Tuple:
         #             delete_index.append(ind)
         # datas = np.delete(datas, delete_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 270:
+        if index == 623 + 190:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 270:
+        if index == 2081 + 190:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 270:
+        if index == 2516 + 190:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         keys = datas[:, 1]
@@ -834,6 +834,7 @@ class PostProcess:
             self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
 
             self.lexi_result = self._get_result_from_lexi(test)
+            # print(1)
 
     def _get_result_from_lexi(self, test: list) -> Tuple:
 
@@ -841,6 +842,7 @@ class PostProcess:
         te_diseases = []
         te_medicines = []
 
+        self.l_diseases.remove("腐病")
         for t in test:
             t_crops = []
             for crop in self.l_crops:
@@ -1029,35 +1031,40 @@ def find_all(source: str, dest: str) -> list:
 # ================================= main ================================= #
 if __name__ == '__main__':
 
+    # t = pd.read_csv('./result.csv').values
+    # t1 = t[:, 0]
+    # crop = [eval(item) for item in t[:, 1].tolist()]
+    # disease = [eval(item) for item in t[:, 2].tolist()]
+    # medcines = t[:, 3].tolist()
+    # for index, item in enumerate(medcines):
+    #
+    #     try:
+    #         medcines[index] = eval(item)
+    #     except Exception as e:
+    #         print(e)
+    #         print(1)
+
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1].tolist()
     lexi = build_lexi(train[:, 1:])
+    t = lexi[1].get('烧病')
 
     # ======================== enhance data ========================= #
-    crops = ['大蒜', '番茄', '草莓', '西红柿']
-    diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:10]
-    diseases = ['高温烫伤', '蚧壳虫', '立枯病', '条斑病毒病', '缺少硼', '烂根', '高等真菌', '阔叶杂草', '低温冻害', '地下害虫', '蔓枯病', '烟青虫', '一茶黄螨', '土传病害', '花叶病', '斜纹夜蛾', '污病', '抗病品种', '根结线虫', '高温烧烤', '斑潜蝇', '抗病能力', '蜗牛危害', '小叶病', '抗病威', '病情严重']
-    medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:30]
-    medicines = ['烯唑醇', '乙嘧酚', '菊酯类农药', '硫磺', '壬菌铜', '平衡肥', '铜制剂', '乙醚酚', '核苷酸', '苯菌灵', '波尔多液', '吲哚乙酸', '微乳剂', '虫酰肼', '氟啶脲', '印楝素', '鱼藤酮', '药剂副作用', '天然芸苔素内酯', '流体钙', '阿维炔螨特', '十烯酰吗啉', '藜芦碱', '多杀霉素', '苯氧威', '扑海因', '虱螨脲']
+    diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:80]
+    diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病', '菌核病']
+    medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:80]
+    medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留']
     insert_index = []
-    for index, item in enumerate(train):
-        has_crop = False
-        for j in crops:
-            if item[0].find(j) != -1:
-                has_crop = True
-                break
-        if has_crop:
-            insert_index.append(index)
-    for index, item in enumerate(train):
+    for index, item in enumerate(train[:len(train) - 200]):
         has_disease = False
         for j in diseases:
             if item[0].find(j) != -1:
                 has_disease = True
                 break
-        if has_disease and index not in insert_index:
+        if has_disease:
             insert_index.append(index)
-    for index, item in enumerate(train):
+    for index, item in enumerate(train[:len(train) - 200]):
         has_medicine = False
         for j in medicines:
             if item[0].find(j) != -1:
@@ -1068,13 +1075,13 @@ if __name__ == '__main__':
     enhance_part = np.repeat(train[insert_index], 5, axis=0)
     for item in enhance_part:
         train = np.insert(train, 0, item, axis=0)
-
     VECTOR_SIZE = 128
     pre_train = True
     USING_CRF = False
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
+    print(22)
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
         # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
@@ -1082,14 +1089,14 @@ if __name__ == '__main__':
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
-        vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
+        # vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 9  # using 10-fold cross validation 5
+    fold_index = 5  # using 10-fold cross validation 5
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
     # token = token[:len(train_seqs)]
     # train_data = token[:TRAIN_LENGTH - 100]
@@ -1140,7 +1147,7 @@ if __name__ == '__main__':
     LR = 1e-2
     INPUT_SIZE = len(vocab)
     NUM_LAYERS = 1
-    EPOCH = 50
+    EPOCH = 30
     pre_model = torch.from_numpy(vectors) if pre_train else None
     # init model
     if USING_CRF:
@@ -1153,7 +1160,7 @@ if __name__ == '__main__':
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-    lr_s = StepLR(optim, step_size=20, gamma=0.1)
+    lr_s = StepLR(optim, step_size=10, gamma=0.1)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
