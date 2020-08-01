@@ -64,11 +64,11 @@ def get_process_data(train: list) -> Tuple:
         #             delete_index.append(ind)
         # datas = np.delete(datas, delete_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 190:
+        if index == 623 + 380:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 190:
+        if index == 2081 + 380:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 190:
+        if index == 2516 + 380:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         keys = datas[:, 1]
@@ -289,6 +289,7 @@ class BiLSTM(nn.Module):
             self.embedding = nn.Embedding.from_pretrained(pre_model)
         else:
             self.embedding = nn.Embedding(input_dim, em_dim)
+
         self.rnn = LSTM(
             input_size=em_dim,
             hidden_size=hidden_dim,
@@ -302,6 +303,7 @@ class BiLSTM(nn.Module):
     def forward(self, x: Tensor, lengths: list) -> Tensor:
 
         embeded = self.dropout(self.embedding(x))
+
         packed = pack_padded_sequence(embeded, lengths, batch_first=True, enforce_sorted=False)
         output, hidden = self.rnn(packed)
         output, hidden = pad_packed_sequence(output, batch_first=True)
@@ -549,15 +551,16 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         break
                     else:
                         # 扩展一位，尽可能纠错
-                        if item[k + 1] == e_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                            seq = seq + seq_item[k + 1]
-                            last_index = k + 1
-                            break
-                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                        else:
-                            break
+                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        #     seq = seq + seq_item[k + 1]
+                        #     last_index = k + 1
+                        #     break
+                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        # else:
+                        #     break
+                        break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -1049,7 +1052,7 @@ if __name__ == '__main__':
     test_seqs = test[:, 1].tolist()
     lexi = build_lexi(train[:, 1:])
     t = lexi[1].get('烧病')
-
+    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素
     # ======================== enhance data ========================= #
     diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:80]
     diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病', '菌核病']
@@ -1072,7 +1075,7 @@ if __name__ == '__main__':
                 break
         if has_medicine and index not in insert_index:
             insert_index.append(index)
-    enhance_part = np.repeat(train[insert_index], 5, axis=0)
+    enhance_part = np.repeat(train[insert_index], 10, axis=0)
     for item in enhance_part:
         train = np.insert(train, 0, item, axis=0)
     VECTOR_SIZE = 128
@@ -1081,7 +1084,6 @@ if __name__ == '__main__':
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
-    print(22)
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
         # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
@@ -1089,7 +1091,7 @@ if __name__ == '__main__':
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
-        # vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
+        vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
