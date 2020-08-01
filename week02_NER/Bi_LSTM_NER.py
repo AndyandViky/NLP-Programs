@@ -17,7 +17,7 @@ import pandas as pd
 import scipy.io as scio
 
 from torch.nn import LSTM
-from itertools import zip_longest
+from torchcrf import CRF
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Dataset, DataLoader
@@ -35,7 +35,16 @@ def get_punctuation() -> str:
     return z_punctuation
 
 
-DATA_DIR = './datas/QA_data'
+def get_params(crf: bool = False) -> Tuple:
+
+    config = {
+        0: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
+        1: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
+    }
+
+    return config[int(crf)]
+
+
 # ================================= pre-processing data ================================= #
 def get_process_data(train: list) -> Tuple:
 
@@ -142,16 +151,11 @@ def build_corpus(test_seqs: list, train_seqs: list, use_word: bool = False, vect
         )
         vocab.update({'<pad>': len(vocab)})
         vocab.update({'<unk>': len(vocab)})
-        vocab.update({'<start>': len(vocab)})
-        vocab.update({'<end>': len(vocab)})
         return vocab, token, [], []
 
 
 def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int, crf: bool = False) -> Tuple:
 
-    if crf:
-        train_char_labels = [item + ['<end>'] for item in train_char_labels]
-        token = [item + ['<end>'] for item in token]
     # char to id
     def get_char_id(sequence: list, vocab: dict) -> list:
         ids = []
@@ -167,18 +171,11 @@ def seq2id(token: list, vocab: dict, train_char_labels: list, train_length: int,
     )
     category_dict.update({'<pad>': len(category_dict)})
     category_dict.update({'<unk>': len(category_dict)})
-    if crf:
-        category_dict.update({'<start>': len(category_dict)})
 
-    def get_label_id(labels: list):
-        ids = []
-        for c in labels:
-            # label to id
-            ids.append(category_dict[c])
-        return ids
-    train_char_labels = np.array([get_label_id(labels) for labels in train_char_labels])
+    train_char_labels = np.array([get_char_id(labels, category_dict) for labels in train_char_labels])
 
     return train_char_ids, train_char_labels, test_char_ids, category_dict
+# ================================= pre-processing data ================================= #
 
 
 # ================================= data ================================= #
@@ -270,6 +267,7 @@ def get_data_loader(root: str,
                                      collate_fn=lambda batch: np.array(batch)))
 
     return dataloader if test else dataloader[:2]
+# ================================= data ================================= #
 
 
 # ================================= model ================================= #
@@ -326,7 +324,7 @@ class BiLSTM(nn.Module):
 
         return criterion(logits, targets)
 
-    def get_word_id(self, output: Tensor, category_dict: dict, lengths=None) -> Tensor:
+    def get_word_id(self, output: Tensor) -> Tensor:
 
         return torch.argmax(output, 2).data.cpu().numpy()
 
@@ -356,8 +354,7 @@ class BiLSTM_CRF(nn.Module):
             batch_first=True,
         )
         self.out = nn.Linear(hidden_dim * 2, output_dim)
-        self.transition = nn.Parameter(
-            torch.ones(output_dim, output_dim) * 1 / output_dim)
+        self.crf = CRF(output_dim, batch_first=True)
 
     def forward(self, x: Tensor, lengths: list) -> Tensor:
 
@@ -366,156 +363,24 @@ class BiLSTM_CRF(nn.Module):
         output, hidden = self.rnn(packed)
         output, hidden = pad_packed_sequence(output, batch_first=True)
         output = self.out(output)
-        crf_scores = output.unsqueeze(
-            2).expand(-1, -1, self.output_dim, -1) + self.transition.unsqueeze(0)
 
-        return crf_scores
+        return output
 
-    def indexed(self, targets: Tensor, tagset_size: int, start_id: int) -> Tensor:
-        """将targets中的数转化为在[T*T]大小序列中的索引,T是标注的种类"""
-        batch_size, max_len = targets.size()
-        for col in range(max_len - 1, 0, -1):
-            targets[:, col] += (targets[:, col - 1] * tagset_size)
-        targets[:, 0] += (start_id * tagset_size)
-        return targets
+    def caculate_loss(self, output: Tensor, target: Tensor, category_dict: dict, _) -> Tensor:
 
-    def caculate_loss(self, output: Tensor, target: Tensor, category_dict: dict, criterion=None) -> Tensor:
+        PAD = category_dict['<pad>']
+        assert PAD is not None
 
-        pad_id = category_dict['<pad>']
-        start_id = category_dict['<start>']
-        end_id = category_dict['<end>']
+        mask = (target != PAD)  # [B, L]
 
-        device = output.device
+        return - self.crf(output, target, mask)
 
-        # targets:[B, L] crf_scores:[B, L, T, T]
-        batch_size, max_len = target.size()
-        target_size = len(category_dict)
-
-        # mask = 1 - ((targets == pad_id) + (targets == end_id))  # [B, L]
-        mask = (target != pad_id)
-        lengths = mask.sum(dim=1)
-        targets = self.indexed(target, target_size, start_id)
-
-        # # 计算Golden scores方法１
-        # import pdb
-        # pdb.set_trace()
-        targets = targets.masked_select(mask)  # [real_L]
-
-        flatten_scores = output.masked_select(
-            mask.view(batch_size, max_len, 1, 1).expand_as(output)
-        ).view(-1, target_size * target_size).contiguous()
-
-        golden_scores = flatten_scores.gather(
-            dim=1, index=targets.unsqueeze(1)).sum()
-
-        # 计算golden_scores方法２：利用pack_padded_sequence函数
-        # targets[targets == end_id] = pad_id
-        # scores_at_targets = torch.gather(
-        #     crf_scores.view(batch_size, max_len, -1), 2, targets.unsqueeze(2)).squeeze(2)
-        # scores_at_targets, _ = pack_padded_sequence(
-        #     scores_at_targets, lengths-1, batch_first=True
-        # )
-        # golden_scores = scores_at_targets.sum()
-
-        # 计算all path scores
-        # scores_upto_t[i, j]表示第i个句子的第t个词被标注为j标记的所有t时刻事前的所有子路径的分数之和
-        scores_upto_t = torch.zeros(batch_size, target_size).to(device)
-        for t in range(max_len):
-            # 当前时刻 有效的batch_size（因为有些序列比较短)
-            batch_size_t = (lengths > t).sum().item()
-            if t == 0:
-                scores_upto_t[:batch_size_t] = output[:batch_size_t,
-                                               t, start_id, :]
-            else:
-                # We add scores at current timestep to scores accumulated up to previous
-                # timestep, and log-sum-exp Remember, the cur_tag of the previous
-                # timestep is the prev_tag of this timestep
-                # So, broadcast prev. timestep's cur_tag scores
-                # along cur. timestep's cur_tag dimension
-                scores_upto_t[:batch_size_t] = torch.logsumexp(
-                    output[:batch_size_t, t, :, :] +
-                    scores_upto_t[:batch_size_t].unsqueeze(2),
-                    dim=1
-                )
-        all_path_scores = scores_upto_t[:, end_id].sum()
-
-        # 训练大约两个epoch loss变成负数，从数学的角度上来说，loss = -logP
-        loss = (all_path_scores - golden_scores) / batch_size
-        return loss
-
-    def get_word_id(self, ouput: Tensor, category_dict: dict, lengths=None) -> Tensor:
+    def get_word_id(self, output: Tensor) -> Tensor:
 
         """使用维特比算法进行解码"""
-        start_id = category_dict['<start>']
-        end_id = category_dict['<end>']
-        pad = category_dict['<pad>']
-        tagset_size = len(category_dict)
-
-        device = ouput.device
-        # B:batch_size, L:max_len, T:target set size
-        B, L, T, _ = ouput.size()
-        # viterbi[i, j, k]表示第i个句子，第j个字对应第k个标记的最大分数
-        viterbi = torch.zeros(B, L, T).to(device)
-        # backpointer[i, j, k]表示第i个句子，第j个字对应第k个标记时前一个标记的id，用于回溯
-        backpointer = (torch.zeros(B, L, T).long() * end_id).to(device)
-        lengths = torch.LongTensor(lengths).to(device)
-        # 向前递推
-        for step in range(L):
-            batch_size_t = (lengths > step).sum().item()
-            if step == 0:
-                # 第一个字它的前一个标记只能是start_id
-                viterbi[:batch_size_t, step,
-                :] = ouput[: batch_size_t, step, start_id, :]
-                backpointer[: batch_size_t, step, :] = start_id
-            else:
-                max_scores, prev_tags = torch.max(
-                    viterbi[:batch_size_t, step - 1, :].unsqueeze(2) +
-                    ouput[:batch_size_t, step, :, :],  # [B, T, T]
-                    dim=1
-                )
-                viterbi[:batch_size_t, step, :] = max_scores
-                backpointer[:batch_size_t, step, :] = prev_tags
-
-        # 在回溯的时候我们只需要用到backpointer矩阵
-        backpointer = backpointer.view(B, -1)  # [B, L * T]
-        tagids = []  # 存放结果
-        tags_t = None
-        for step in range(L - 1, 0, -1):
-            batch_size_t = (lengths > step).sum().item()
-            if step == L - 1:
-                index = torch.ones(batch_size_t).long() * (step * tagset_size)
-                index = index.to(device)
-                index += end_id
-            else:
-                prev_batch_size_t = len(tags_t)
-
-                new_in_batch = torch.LongTensor(
-                    [end_id] * (batch_size_t - prev_batch_size_t)).to(device)
-                offset = torch.cat(
-                    [tags_t, new_in_batch],
-                    dim=0
-                )  # 这个offset实际上就是前一时刻的
-                index = torch.ones(batch_size_t).long() * (step * tagset_size)
-                index = index.to(device)
-                index += offset.long()
-
-            try:
-                tags_t = backpointer[:batch_size_t].gather(
-                    dim=1, index=index.unsqueeze(1).long())
-            except RuntimeError:
-                import pdb
-                pdb.set_trace()
-            tags_t = tags_t.squeeze(1)
-            tagids.append(tags_t.tolist())
-
-        # tagids:[L-1]（L-1是因为扣去了end_token),大小的liebiao
-        # 其中列表内的元素是该batch在该时刻的标记
-        # 下面修正其顺序，并将维度转换为 [B, L]
-        tagids = list(zip_longest(*reversed(tagids), fillvalue=pad))
-        tagids = torch.Tensor(tagids).long()
-
-        # 返回解码的结果
-        return tagids
+        output = np.array(self.crf.decode(output))
+        return output
+# ================================= model ================================= #
 
 
 # ================================= util functions ================================= #
@@ -551,16 +416,15 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         break
                     else:
                         # 扩展一位，尽可能纠错
-                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        #     seq = seq + seq_item[k + 1]
-                        #     last_index = k + 1
-                        #     break
-                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        # else:
-                        #     break
-                        break
+                        if item[k + 1] == e_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                            seq = seq + seq_item[k + 1]
+                            last_index = k + 1
+                            break
+                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                        else:
+                            break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -1029,11 +893,13 @@ def find_all(source: str, dest: str) -> list:
     for x in temp_list:
         dest_list.remove(x)
     return dest_list
+# ================================= util functions ================================= #
 
 
 # ================================= main ================================= #
 if __name__ == '__main__':
 
+    DATA_DIR = './datas/QA_data'
     # t = pd.read_csv('./result.csv').values
     # t1 = t[:, 0]
     # crop = [eval(item) for item in t[:, 1].tolist()]
@@ -1078,9 +944,15 @@ if __name__ == '__main__':
     enhance_part = np.repeat(train[insert_index], 10, axis=0)
     for item in enhance_part:
         train = np.insert(train, 0, item, axis=0)
-    VECTOR_SIZE = 128
-    pre_train = True
+    # ======================== enhance data ========================= #
+
+    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    TRAIN = 'TRAIN'
+    VALID = 'VALID'
+    TEST = 'TEST'
     USING_CRF = False
+    VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
+
     train_seqs, train_char_labels, word_datas = get_process_data(train)
     TRAIN_LENGTH = len(train_seqs) - 200
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
@@ -1100,34 +972,6 @@ if __name__ == '__main__':
 
     fold_index = 5  # using 10-fold cross validation 5
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
-    # token = token[:len(train_seqs)]
-    # train_data = token[:TRAIN_LENGTH - 100]
-    # train_label = train_char_labels[:TRAIN_LENGTH - 100]
-    # valid_data = token[TRAIN_LENGTH - 100:TRAIN_LENGTH + 100]
-    # valid_label = train_char_labels[TRAIN_LENGTH - 100:TRAIN_LENGTH + 100]
-    # test_data = token[TRAIN_LENGTH + 100:]
-    # test_label = train_char_labels[TRAIN_LENGTH + 100:]
-    #
-    # filename = './datas/train.txt'
-    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
-    #     for in1, item in enumerate(train_data):
-    #         for in2, entity in enumerate(item):
-    #             f.write("{} {}\n".format(entity, train_label[in1][in2]))
-    #         f.write("\n")
-    #
-    # filename = './datas/dev.txt'
-    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
-    #     for in1, item in enumerate(valid_data):
-    #         for in2, entity in enumerate(item):
-    #             f.write("{} {}\n".format(entity, valid_label[in1][in2]))
-    #         f.write("\n")
-    #
-    # filename = './datas/test.txt'
-    # with open(filename, 'w') as f:  # 如果filename不存在会自动创建， 'w'表示写数据，写之前会清空文件中的原有数据！
-    #     for in1, item in enumerate(test_data):
-    #         for in2, entity in enumerate(item):
-    #             f.write("{} {}\n".format(entity, test_label[in1][in2]))
-    #         f.write("\n")
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels, len(train_seqs), USING_CRF)
 
@@ -1137,20 +981,10 @@ if __name__ == '__main__':
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
     post_process = PostProcess(train, test_seqs, vocab, vectors.copy(), pre_train)
-
-    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    TRAIN = 'TRAIN'
-    VALID = 'VALID'
-    TEST = 'TEST'
-    HIDDEN_DIM = 320
-    OUTPUT_SIZE = len(category_dict)
-    BATCH_SIZE = 64
-    EM_DIM = VECTOR_SIZE
-    LR = 1e-2
-    INPUT_SIZE = len(vocab)
-    NUM_LAYERS = 1
-    EPOCH = 30
     pre_model = torch.from_numpy(vectors) if pre_train else None
+    OUTPUT_SIZE = len(category_dict)
+    INPUT_SIZE = len(vocab)
+    EM_DIM = VECTOR_SIZE
     # init model
     if USING_CRF:
         model = BiLSTM_CRF(INPUT_SIZE, HIDDEN_DIM, EM_DIM, OUTPUT_SIZE, NUM_LAYERS,
@@ -1162,7 +996,7 @@ if __name__ == '__main__':
             DEVICE)
     # init optimization
     optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
-    lr_s = StepLR(optim, step_size=10, gamma=0.1)
+    lr_s = StepLR(optim, step_size=STEP_SIZE, gamma=GAMMA)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
     # get data iterator
@@ -1199,6 +1033,7 @@ if __name__ == '__main__':
         #     )
         #     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
         for index, batch in enumerate(train_dataloader):
+
             data, lengths = tensorized(batch[:, 0], vocab)
             label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
@@ -1222,7 +1057,7 @@ if __name__ == '__main__':
             label, _ = tensorized(batch[:, 1], category_dict)
             data, label = data.to(DEVICE), label.to(DEVICE)
             output = model(data, lengths)
-            pred = model.get_word_id(output, category_dict, lengths)
+            pred = model.get_word_id(output)
             valid_loss = model.caculate_loss(output, label, category_dict, criterion)
             p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
@@ -1243,7 +1078,7 @@ if __name__ == '__main__':
         label, _ = tensorized(test_l_labels, category_dict)
         data, label = data.to(DEVICE), label.to(DEVICE)
         output = model(data, lengths)
-        pred = model.get_word_id(output, category_dict, lengths)
+        pred = model.get_word_id(output)
         p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict, post_process=post_process),
                                  true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
         print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
@@ -1258,7 +1093,7 @@ if __name__ == '__main__':
         data = data.to(DEVICE)
 
         output = model(data, lengths)
-        pred = model.get_word_id(output, category_dict, lengths)
+        pred = model.get_word_id(output)
 
         crops, diseases, medicines = drop_entity(pred, test_seqs, category_dict, post_process=post_process)
         pd.DataFrame([test[:, 0], crops, diseases, medicines]).T. \
