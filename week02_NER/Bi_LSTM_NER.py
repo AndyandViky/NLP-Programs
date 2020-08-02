@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 import scipy.io as scio
+import synonyms
 
 from torch.nn import LSTM
 from torchcrf import CRF
@@ -51,7 +52,7 @@ def get_process_data(train: list) -> Tuple:
 
     entity = ['n_disease', 'n_crop', 'n_medicine']
     # split data and labels
-    def split_raw_data(sequence: str, index: int) -> Tuple[np.ndarray, str, str, list]:
+    def split_raw_data(sequence: str, index: int) -> Tuple:
         sequence = sequence.replace('，', '，/dj ')
         sequence = sequence.replace('%', '%/pj ')
         sequence = sequence.replace('+', '+/aj ')
@@ -61,46 +62,64 @@ def get_process_data(train: list) -> Tuple:
         raw_arr = sequence.split(' ')
         datas = np.array([i.split('/') for i in raw_arr if i != '' and len(i.split('/')) == 2])
 
+        dele_index = []
         for ind, item in enumerate(datas):
             item[0] = item[0].replace(' ', '')
             item[0] = re.sub(r'[0-9]', '0', item[0])
+
+            if item[0] == '':
+                dele_index.append(ind)
+        datas = np.delete(datas, dele_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 380:
+        if index == 623 + 195:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 380:
+        if index == 2081 + 195:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 380:
+        if index == 2516 + 195:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
-        keys = datas[:, 1]
-        values = datas[:, 0]
-        values = np.delete(values, [index for index, k in enumerate(keys) if k not in entity])
-        true_values = []
-        for item in train[index, 1:]:
-            true_values = true_values + eval(item)
+        # keys = datas[:, 1]
+        # values = datas[:, 0]
+        # values = np.delete(values, [index for index, k in enumerate(keys) if k not in entity])
+        # true_values = []
+        # for item in train[index, 1:]:
+        #     true_values = true_values + eval(item)
+        #
+        # if len(values) == len(true_values):
+        #     for i in values:
+        #         if i not in true_values:
+        #             print(1)
+        # else:
+        #     print(1)
 
-        if len(values) == len(true_values):
-            for i in values:
-                if i not in true_values:
-                    print(1)
-        else:
-            print(1)
+        def extra_info(data: np.ndarray) -> Tuple:
+            char_labels = []
+            for (word, label) in data:
+                if label not in entity:
+                    char_labels = char_labels + ['O' for i in range(len(word))]
+                else:
+                    char_labels.append('B_{}'.format(label))
+                    char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 2)]
+                    char_labels.append('E_{}'.format(label))
 
-        char_labels = []
-        for (word, label) in datas:
-            if label not in entity:
-                char_labels = char_labels + ['O' for i in range(len(word))]
-            else:
-                char_labels.append('B_{}'.format(label))
-                char_labels = char_labels + ['I_{}'.format(label) for i in range(len(word) - 2)]
-                char_labels.append('E_{}'.format(label))
+            seq_data = ''.join(data[:, 0])
+            seq_pro = ' '.join(data[:, 1])
 
-        seq_data = ''.join(datas[:, 0])
-        seq_pro = ' '.join(datas[:, 1])
-        return datas, seq_data, seq_pro, char_labels
+            return data, seq_data, seq_pro, char_labels
 
+        instead_datas = datas.copy()
+        random_index = np.random.randint(0, len(datas), 10)
+        random_index = list(set(random_index))
+        for index in random_index:
+            if datas[index][1] not in entity and datas[index][0] not in (get_punctuation() + '，。；？'):
+                syn_word = synonyms.nearby(datas[index][0])[0]
+                if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
+
+        return (extra_info(datas), extra_info(instead_datas))
+
+    np.random.seed(0)
     post_data = np.array([split_raw_data(item, ind) for ind, item in enumerate(train[:, 0])])
-
+    post_data = post_data.reshape((-1, post_data.shape[2]))
     return post_data[:, 0], post_data[:, 1], post_data[:, 2], post_data[:, 3]
 
 
@@ -616,12 +635,12 @@ def add_lexi_infomation(lexi_dict: dict, vocab: dict, vectors: np.ndarray) -> np
 
 class PostProcess:
 
-    def __init__(self, train: np.ndarray, test: list, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
+    def __init__(self, lexi: Tuple, test: list, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
 
         if pre_train:
             self.vocab = vocab
             self.vectors = vectors
-            self.l_crops, self.l_diseases, self.l_medicines = build_lexi(train[:, 1:])
+            self.l_crops, self.l_diseases, self.l_medicines = lexi
             self.l_crops, self.l_diseases, self.l_medicines = list(self.l_crops.keys()), list(
                 self.l_diseases.keys()), list(self.l_medicines.keys())
             self.lv_corps = self._build_phrase_vectors(self.l_crops)
@@ -828,7 +847,7 @@ def enhance_data(train_data: np.ndarray) -> np.ndarray:
     diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病',
                 '菌核病']
     # medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:80]
-    medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留']
+    medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留', '有机肥']
 
     def get_relative_index(entity: list) -> list:
         insert_index = []
@@ -846,7 +865,7 @@ def enhance_data(train_data: np.ndarray) -> np.ndarray:
     medi_idnex = get_relative_index(medicines)
 
     insert_index = list(set(dise_index + medi_idnex))
-    enhance_part = np.repeat(train_data[insert_index], 10, axis=0)
+    enhance_part = np.repeat(train_data[insert_index], 5, axis=0)
 
     return enhance_part
 # ================================= util functions ================================= #
@@ -860,8 +879,8 @@ if __name__ == '__main__':
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
-    USING_CRF = True
-    TEST_LENGTH = 200
+    USING_CRF = False
+    TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
     # t = pd.read_csv('./result.csv').values
     # t1 = t[:, 0]
@@ -882,14 +901,15 @@ if __name__ == '__main__':
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
 
     lexi = build_lexi(train[:, 1:])
-    t = lexi[1].get('烧病')
-    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素
+    t = lexi[2].get('硅钙钾')
+    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素, 土壤病菌，氧化亚铜
     # ======================== enhance data ========================= #
     enhance_part = enhance_data(train[:len(train) - TEST_LENGTH])
     train = np.vstack((enhance_part, train))
     # ======================== enhance data ========================= #
 
     word_datas, train_seqs, seq_pros, train_char_labels = get_process_data(train)
+    train = np.repeat(train, 2, axis=0)
     TRAIN_LENGTH = len(train_seqs) - TEST_LENGTH
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
     if pre_train:
@@ -916,7 +936,7 @@ if __name__ == '__main__':
     train_char_labels = train_char_labels[:TRAIN_LENGTH]
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
-    post_process = PostProcess(train, test_seqs, vocab, vectors.copy(), pre_train)
+    post_process = PostProcess(lexi, test_seqs, vocab, vectors.copy(), pre_train)
     pre_model = torch.from_numpy(vectors) if pre_train else None
     OUTPUT_SIZE = len(category_dict)
     INPUT_SIZE = len(vocab)
