@@ -48,7 +48,7 @@ def get_params(crf: bool = False) -> Tuple:
 
 
 # ================================= pre-processing data ================================= #
-def get_process_data(train: list) -> Tuple:
+def get_process_data(train: list, enhance_data: str) -> Tuple:
 
     entity = ['n_disease', 'n_crop', 'n_medicine']
     # split data and labels
@@ -107,19 +107,22 @@ def get_process_data(train: list) -> Tuple:
 
             return data, seq_data, seq_pro, char_labels
 
-        instead_datas = datas.copy()
-        random_index = np.random.randint(0, len(datas), 10)
-        random_index = list(set(random_index))
-        for index in random_index:
-            if datas[index][1] not in entity and datas[index][0] not in (get_punctuation() + '，。；？'):
-                syn_word = synonyms.nearby(datas[index][0])[0]
-                if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
+        if enhance_data:
+            instead_datas = datas.copy()
+            random_index = np.random.randint(0, len(datas), 10)
+            random_index = list(set(random_index))
+            for index in random_index:
+                if datas[index][1] not in entity and datas[index][0] not in (get_punctuation() + '，。；？'):
+                    syn_word = synonyms.nearby(datas[index][0])[0]
+                    if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
 
-        return (extra_info(datas), extra_info(instead_datas))
+            return extra_info(datas), extra_info(instead_datas)
+        else:
+            return extra_info(datas)
 
     np.random.seed(0)
     post_data = np.array([split_raw_data(item, ind) for ind, item in enumerate(train[:, 0])])
-    post_data = post_data.reshape((-1, post_data.shape[2]))
+    if enhance_data: post_data = post_data.reshape((-1, post_data.shape[2]))
     return post_data[:, 0], post_data[:, 1], post_data[:, 2], post_data[:, 3]
 
 
@@ -417,16 +420,17 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         last_index = k
                         break
                     else:
+                        break
                         # 扩展一位，尽可能纠错
-                        if item[k + 1] == e_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                            seq = seq + seq_item[k + 1]
-                            last_index = k + 1
-                            break
-                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                        else:
-                            break
+                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        #     seq = seq + seq_item[k + 1]
+                        #     last_index = k + 1
+                        #     break
+                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        # else:
+                        #     break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -540,10 +544,9 @@ def build_word(word_datas: np.ndarray) -> Tuple:
 
     words = [item[:, 0].tolist() for item in word_datas]
 
-    model = Word2Vec(words, size=128, window=10, min_count=0).wv
+    model = Word2Vec(words, size=128 * 2, window=15, min_count=0).wv
     word_vector = model.vectors
     vocab = model.vocab
-
     return word_vector, vocab
 
 
@@ -570,7 +573,7 @@ def change_lexi2dict(lexi: Tuple, ex_vocab: dict, ex_vectors: np.ndarray, vocab:
         vector = np.array([vectors[vocab.get(s).index] for s in item])
         vector = np.mean(vector, axis=0)
 
-        return vector
+        return 0.9 * vector + 0.1 * ex_vector
 
     words = ''.join(lexi.keys())
     uword = set(words)
@@ -880,6 +883,7 @@ if __name__ == '__main__':
     VALID = 'VALID'
     TEST = 'TEST'
     USING_CRF = False
+    ENHANCE_DATA = True
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
     # t = pd.read_csv('./result.csv').values
@@ -901,15 +905,15 @@ if __name__ == '__main__':
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
 
     lexi = build_lexi(train[:, 1:])
-    t = lexi[2].get('硅钙钾')
-    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素, 土壤病菌，氧化亚铜
+    t = lexi[2].get('糖醇硼')
+    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 嘧菌酯, 虫害
     # ======================== enhance data ========================= #
     enhance_part = enhance_data(train[:len(train) - TEST_LENGTH])
     train = np.vstack((enhance_part, train))
     # ======================== enhance data ========================= #
 
-    word_datas, train_seqs, seq_pros, train_char_labels = get_process_data(train)
-    train = np.repeat(train, 2, axis=0)
+    word_datas, train_seqs, seq_pros, train_char_labels = get_process_data(train, ENHANCE_DATA)
+    if ENHANCE_DATA: train = np.repeat(train, 2, axis=0)
     TRAIN_LENGTH = len(train_seqs) - TEST_LENGTH
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
     if pre_train:
@@ -919,14 +923,14 @@ if __name__ == '__main__':
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
-        vectors = np.hstack((vectors, elmo_vectors[:, :128], wiki_bc_vectors[:, :128]))
+        vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE]))
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 5  # using 10-fold cross validation 5
+    fold_index = 9  # using 10-fold cross validation 5
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
