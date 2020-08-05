@@ -27,6 +27,7 @@ from xpinyin import Pinyin
 from gensim.models import Word2Vec
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from sklearn.metrics import confusion_matrix, classification_report
+# !python -m elmoformanylangs.biLM train --train_path ./token.raw --config_path ./cnn_50_100_512_4096_sample.json --model ./QA.model --optimizer adam --lr 0.001 --lr_decay 0.8 --max_epoch 10 --max_sent_len 200 --max_vocab_size 150000 --min_count 3 --gpu 0
 
 
 def get_punctuation() -> str:
@@ -43,7 +44,7 @@ def get_params(crf: bool = False) -> Tuple:
         0: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
         1: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
     }
-    print(2)
+    print(1)
     return config[int(crf)]
 
 
@@ -71,11 +72,11 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 195:
+        if index == 623 + 400:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 195:
+        if index == 2081 + 400:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 195:
+        if index == 2516 + 400:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         # keys = datas[:, 1]
@@ -420,17 +421,16 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         last_index = k
                         break
                     else:
-                        break
                         # 扩展一位，尽可能纠错
-                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        #     seq = seq + seq_item[k + 1]
-                        #     last_index = k + 1
-                        #     break
-                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        # else:
-                        #     break
+                        if item[k + 1] == e_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                            seq = seq + seq_item[k + 1]
+                            last_index = k + 1
+                            break
+                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                            seq = seq + seq_item[k]
+                        else:
+                            break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -544,7 +544,7 @@ def build_word(word_datas: np.ndarray) -> Tuple:
 
     words = [item[:, 0].tolist() for item in word_datas]
 
-    model = Word2Vec(words, size=128 * 2, window=15, min_count=0).wv
+    model = Word2Vec(words, size=128 * 3, window=15, min_count=0).wv
     word_vector = model.vectors
     vocab = model.vocab
     return word_vector, vocab
@@ -868,7 +868,7 @@ def enhance_data(train_data: np.ndarray) -> np.ndarray:
     medi_idnex = get_relative_index(medicines)
 
     insert_index = list(set(dise_index + medi_idnex))
-    enhance_part = np.repeat(train_data[insert_index], 5, axis=0)
+    enhance_part = np.repeat(train_data[insert_index], 10, axis=0)
 
     return enhance_part
 # ================================= util functions ================================= #
@@ -883,8 +883,8 @@ if __name__ == '__main__':
     VALID = 'VALID'
     TEST = 'TEST'
     USING_CRF = False
-    ENHANCE_DATA = True
-    TEST_LENGTH = 500
+    ENHANCE_DATA = False
+    TEST_LENGTH = 200
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
     # t = pd.read_csv('./result.csv').values
     # t1 = t[:, 0]
@@ -904,9 +904,6 @@ if __name__ == '__main__':
     test_seqs = test[:, 1]
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
 
-    lexi = build_lexi(train[:, 1:])
-    t = lexi[2].get('糖醇硼')
-    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 嘧菌酯, 虫害
     # ======================== enhance data ========================= #
     enhance_part = enhance_data(train[:len(train) - TEST_LENGTH])
     train = np.vstack((enhance_part, train))
@@ -916,6 +913,11 @@ if __name__ == '__main__':
     if ENHANCE_DATA: train = np.repeat(train, 2, axis=0)
     TRAIN_LENGTH = len(train_seqs) - TEST_LENGTH
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
+
+    lexi = build_lexi(train[:, 1:])
+    t = lexi[2].get('高效氯氰菊酯')
+    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 嘧菌酯, 虫害
+
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
         # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
@@ -923,14 +925,14 @@ if __name__ == '__main__':
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
-        vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE]))
+        vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE], wiki_bc_vectors[:, :VECTOR_SIZE]))
         word_vector, word_vocab = build_word(word_datas)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 9  # using 10-fold cross validation 5
+    fold_index = 2  # using 10-fold cross validation 5
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
@@ -991,6 +993,7 @@ if __name__ == '__main__':
             loss = model.caculate_loss(output, label, category_dict, criterion)
 
             loss.backward()
+            # nn.utils.clip_grad_norm_(model.parameters(), 5)
             optim.step()
 
             train_loss += loss.item()
