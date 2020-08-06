@@ -421,16 +421,17 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         last_index = k
                         break
                     else:
+                        break
                         # 扩展一位，尽可能纠错
-                        if item[k + 1] == e_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                            seq = seq + seq_item[k + 1]
-                            last_index = k + 1
-                            break
-                        elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                            seq = seq + seq_item[k]
-                        else:
-                            break
+                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        #     seq = seq + seq_item[k + 1]
+                        #     last_index = k + 1
+                        #     break
+                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
+                        #     seq = seq + seq_item[k]
+                        # else:
+                        #     break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -638,11 +639,19 @@ def add_lexi_infomation(lexi_dict: dict, vocab: dict, vectors: np.ndarray) -> np
 
 class PostProcess:
 
-    def __init__(self, lexi: Tuple, test: list, vocab: dict, vectors: np.ndarray, pre_train: bool = True):
+    def __init__(self, lexi: Tuple,
+                 test: list,
+                 vocab: dict,
+                 vectors: np.ndarray,
+                 char_vocab: dict,
+                 char_vectors: np.ndarray,
+                 pre_train: bool = True):
 
         if pre_train:
             self.vocab = vocab
             self.vectors = vectors
+            self.char_vocab = char_vocab
+            self.char_vectors = char_vectors
             self.l_crops, self.l_diseases, self.l_medicines = lexi
             self.l_crops, self.l_diseases, self.l_medicines = list(self.l_crops.keys()), list(
                 self.l_diseases.keys()), list(self.l_medicines.keys())
@@ -659,7 +668,6 @@ class PostProcess:
         te_diseases = []
         te_medicines = []
 
-        self.l_diseases.remove("腐病")
         for t in test:
             t_crops = []
             for crop in self.l_crops:
@@ -711,14 +719,19 @@ class PostProcess:
             entitys[in1] = np.delete(np.array(entitys[in1]), delete_index).tolist()
         return entitys
 
-    def _get_phrase_vector(self, item: str):
+    def _get_phrase_vector(self, item: str) -> np.ndarray:
 
-        vectors = []
-        for s in item:
-            vectors.append(self.vectors[self.vocab.get(s)])
-        vectors = np.array(vectors)
-
-        return np.mean(vectors, axis=0)
+        vector = []
+        for i in item:
+            vector.append(self.char_vectors[self.char_vocab.get(i)])
+        return np.mean(np.array(vector), axis=0)
+        # if item not in self.vocab.keys():
+        #     vector = []
+        #     for i in item:
+        #         vector.append(self.char_vectors[self.char_vocab.get(i)])
+        #     return np.mean(np.array(vector), axis=0)
+        # else:
+        #     return self.vectors[self.vocab.get(item).index]
 
     def _calculate_similarity(self, entity: str, vectors: np.ndarray) -> Tuple:
 
@@ -886,18 +899,6 @@ if __name__ == '__main__':
     ENHANCE_DATA = False
     TEST_LENGTH = 200
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
-    # t = pd.read_csv('./result.csv').values
-    # t1 = t[:, 0]
-    # crop = [eval(item) for item in t[:, 1].tolist()]
-    # disease = [eval(item) for item in t[:, 2].tolist()]
-    # medcines = t[:, 3].tolist()
-    # for index, item in enumerate(medcines):
-    #
-    #     try:
-    #         medcines[index] = eval(item)
-    #     except Exception as e:
-    #         print(e)
-    #         print(1)
 
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
     test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
@@ -916,7 +917,7 @@ if __name__ == '__main__':
 
     lexi = build_lexi(train[:, 1:])
     t = lexi[2].get('高效氯氰菊酯')
-    # 日烧病，硅钙钾镁肥，肟菌脂, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 嘧菌酯, 虫害
+    # 日烧病, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 磷酸钾, 氯虫苯甲酰胺, 蚜茧蜂
 
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
@@ -942,7 +943,7 @@ if __name__ == '__main__':
     train_char_labels = train_char_labels[:TRAIN_LENGTH]
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
-    post_process = PostProcess(lexi, test_seqs, vocab, vectors.copy(), pre_train)
+    post_process = PostProcess(lexi, test_seqs, word_vocab, word_vector.copy(), vocab, vectors.copy(), pre_train)
     pre_model = torch.from_numpy(vectors) if pre_train else None
     OUTPUT_SIZE = len(category_dict)
     INPUT_SIZE = len(vocab)
