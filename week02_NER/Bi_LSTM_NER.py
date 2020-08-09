@@ -126,6 +126,16 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
                     exchange_datas[random_index[0]] = exchange_datas[random_index[1]]
                     exchange_datas[random_index[1]] = t
 
+            # insert_datas = datas.copy()
+            # while True:
+            #     random_index = np.random.randint(0, len(datas), 1)
+            #     insert = insert_datas[random_index]
+            #     if insert[0][0] not in (get_punctuation() + '，。；？'):
+            #         break
+            # insert_index = list(set(np.random.randint(0, len(datas), 3)))
+            # for index in insert_index:
+            #     insert_datas = np.insert(insert_datas, index, insert, axis=0)
+
             return extra_info(datas), extra_info(exchange_datas)
         else:
             return extra_info(datas)
