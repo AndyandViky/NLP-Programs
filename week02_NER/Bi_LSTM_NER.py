@@ -72,11 +72,11 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
         # 623, 2081, 2516
-        if index == 623 + 400:
+        if index == 623 + 370:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 400:
+        if index == 2081 + 370:
             datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 400:
+        if index == 2516 + 370:
             datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         # keys = datas[:, 1]
@@ -109,15 +109,24 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             return data, seq_data, seq_pro, char_labels
 
         if enhance_data:
-            instead_datas = datas.copy()
-            random_index = np.random.randint(0, len(datas), 10)
-            random_index = list(set(random_index))
-            for index in random_index:
-                if datas[index][1] not in entity and datas[index][0] not in (get_punctuation() + '，。；？'):
-                    syn_word = synonyms.nearby(datas[index][0])[0]
-                    if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
+            # instead_datas = datas.copy()
+            # random_index = np.random.randint(0, len(datas), 10)
+            # random_index = list(set(random_index))
+            # for index in random_index:
+            #     if datas[index][1] not in entity and datas[index][0] not in (get_punctuation() + '，。；？'):
+            #         syn_word = synonyms.nearby(datas[index][0])[0]
+            #         if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
 
-            return extra_info(datas), extra_info(instead_datas)
+            exchange_datas = datas.copy()
+            for ite in range(3):
+                random_index = np.random.randint(0, len(datas), 2)
+                random_index = list(set(random_index))
+                if len(random_index) == 2:
+                    t = exchange_datas[random_index[0]].copy()
+                    exchange_datas[random_index[0]] = exchange_datas[random_index[1]]
+                    exchange_datas[random_index[1]] = t
+
+            return extra_info(datas), extra_info(exchange_datas)
         else:
             return extra_info(datas)
 
@@ -863,7 +872,7 @@ def enhance_data(train_data: np.ndarray) -> np.ndarray:
     diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病',
                 '菌核病']
     # medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:80]
-    medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留', '有机肥']
+    medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留']
 
     def get_relative_index(entity: list) -> list:
         insert_index = []
@@ -896,8 +905,8 @@ if __name__ == '__main__':
     VALID = 'VALID'
     TEST = 'TEST'
     USING_CRF = False
-    ENHANCE_DATA = False
-    TEST_LENGTH = 200
+    ENHANCE_DATA = True
+    TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
     train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
@@ -933,7 +942,7 @@ if __name__ == '__main__':
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 2  # using 10-fold cross validation 5
+    fold_index = 9  # using 10-fold cross validation 5
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
