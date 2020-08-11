@@ -565,7 +565,7 @@ def build_word(word_datas: np.ndarray, size: int) -> Tuple:
 
     words = [item[:, 0].tolist() for item in word_datas]
 
-    model = Word2Vec(words, size=size * 3, window=15, min_count=0).wv
+    model = Word2Vec(words, size=size, window=15, min_count=0).wv
     word_vector = model.vectors
     vocab = model.vocab
     return word_vector, vocab
@@ -802,17 +802,13 @@ def get_wiki_vectors(vocab: list) -> np.ndarray:
     raw = open('{}/newsblogbbs.vec'.format(DATA_DIR))
     line = raw.readline()
     vectors = np.zeros((len(vocab), 200))
-    count = 0
     while True:
         line = raw.readline()
         if line == '':
             break
         line = line.split(' ')
-        if line[0] in vocab[4:]:
-            count += 1
+        if line[0] in vocab[2:]:
             vectors[vocab.index(line[0])] = np.array(line[1:-1], dtype=np.float32)
-            if count == len(vocab) - 4:
-                break
 
     scio.savemat('{}/w2v_wiki.mat'.format(DATA_DIR), {'vectors': vectors})
     return vectors
@@ -824,8 +820,20 @@ def get_elmo_vector(vocab: list) -> np.ndarray:
     e = Embedder('{}/zhs.model'.format(DATA_DIR))
 
     vectors = np.zeros((len(vocab), 1024))
-    vectors[4:] = e.sents2elmo(vocab[4:])
+    vectors[2:] = e.sents2elmo(vocab[2:])
     scio.savemat('{}/elmo.mat'.format(DATA_DIR), {'vectors': vectors})
+    return vectors
+
+
+def get_bert_vector(vocab: list) -> np.ndarray:
+
+    from bert_serving.client import BertClient
+    bc = BertClient()
+
+    vectors = np.zeros((len(vocab), 768))
+    vectors[2:1066] = bc.encode(vocab[2:1066])
+    vectors[1067:] = bc.encode(vocab[1067:])
+    scio.savemat('{}/bert.mat'.format(DATA_DIR), {'vectors': vectors})
     return vectors
 
 
@@ -834,17 +842,13 @@ def get_wiki_bc(vocab: list) -> np.ndarray:
     raw = open('{}/w2v_wiki.bigram-char'.format(DATA_DIR))
     line = raw.readline()
     vectors = np.zeros((len(vocab), 300))
-    count = 0
     while True:
         line = raw.readline()
         if line == '':
             break
         line = line.split(' ')
-        if line[0] in vocab[4:]:
-            count += 1
+        if line[0] in vocab[2:]:
             vectors[vocab.index(line[0])] = np.array(line[1:-1], dtype=np.float32)
-            if count == len(vocab) - 4:
-                break
 
     scio.savemat('{}/w2v_wiki_bc.mat'.format(DATA_DIR), {'vectors': vectors})
     return vectors
@@ -943,11 +947,13 @@ if __name__ == '__main__':
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
         # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
         # wiki_bc_vectors = get_wiki_bc(list(vocab.keys()))
+        # bert_vectors = get_bert_vector(list(vocab.keys()))
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
+        bert_vectors = scio.loadmat('{}/bert.mat'.format(DATA_DIR))['vectors']
         vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE], wiki_bc_vectors[:, :VECTOR_SIZE]))
-        word_vector, word_vocab = build_word(word_datas, VECTOR_SIZE)
+        word_vector, word_vocab = build_word(word_datas, VECTOR_SIZE * 3)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
