@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 import scipy.io as scio
-import synonyms
+# import synonyms
 
 from torch.nn import LSTM
 from torchcrf import CRF
@@ -354,6 +354,7 @@ class BiLSTM(nn.Module):
 
     def get_word_id(self, output: Tensor) -> Tensor:
 
+        output = torch.softmax(output, 2)
         return torch.argmax(output, 2).data.cpu().numpy()
 
 
@@ -560,11 +561,11 @@ def build_lexi(data: np.ndarray) -> Tuple:
     return l_crops, l_diseases, l_medicines
 
 
-def build_word(word_datas: np.ndarray) -> Tuple:
+def build_word(word_datas: np.ndarray, size: int) -> Tuple:
 
     words = [item[:, 0].tolist() for item in word_datas]
 
-    model = Word2Vec(words, size=128 * 3, window=15, min_count=0).wv
+    model = Word2Vec(words, size=size * 3, window=15, min_count=0).wv
     word_vector = model.vectors
     vocab = model.vocab
     return word_vector, vocab
@@ -936,7 +937,7 @@ if __name__ == '__main__':
 
     lexi = build_lexi(train[:, 1:])
     t = lexi[2].get('高效氯氰菊酯')
-    # 日烧病, 叶绿素，氧化亚铜, 除草剂残留, 烧根, 糖醇硼, 红蜘蛛, 磷酸钾, 氯虫苯甲酰胺, 蚜茧蜂
+    # 日烧病, 叶绿素，氧化亚铜, 除草剂残留, 糖醇硼, 红蜘蛛, 磷酸钾, 氯虫苯甲酰胺, 蚜茧蜂, 肟菌脂，塞菌铜，链霉素
 
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
@@ -946,7 +947,7 @@ if __name__ == '__main__':
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
         vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE], wiki_bc_vectors[:, :VECTOR_SIZE]))
-        word_vector, word_vocab = build_word(word_datas)
+        word_vector, word_vocab = build_word(word_datas, VECTOR_SIZE)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
         lexi_dict = change_lexi2dict(lexi, word_vocab, word_vector, r_vocab, vectors.copy())
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
