@@ -413,7 +413,7 @@ class BiLSTM_CRF(nn.Module):
 
 
 # ================================= util functions ================================= #
-def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_process) -> Tuple:
+def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_process=None) -> Tuple:
 
     b_crop, i_crop, e_crop = category_dict['B_n_crop'], category_dict['I_n_crop'], category_dict['E_n_crop']
 
@@ -460,7 +460,10 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
     diseases = [get_entity_id(test_seqs[index], item, b_disease, i_disease, e_disease) for index, item in enumerate(pred)]
     medicines = [get_entity_id(test_seqs[index], item, b_medicine, i_medicine, e_medicine) for index, item in enumerate(pred)]
 
-    return post_process(crops, 0), post_process(diseases, 1), post_process(medicines, 2)
+    if post_process is None:
+        return crops, diseases, medicines
+    else:
+        return post_process(crops, 0), post_process(diseases, 1), post_process(medicines, 2)
 
 
 def caculate_f_acc(crops: list, diseases: list, medicines: list, true_labels: np.ndarray) -> Tuple:
@@ -665,7 +668,8 @@ class PostProcess:
                  vectors: np.ndarray,
                  char_vocab: dict,
                  char_vectors: np.ndarray,
-                 pre_train: bool = True):
+                 pre_train: bool = True,
+                 ids: list = []):
 
         if pre_train:
             self.vocab = vocab
@@ -673,13 +677,16 @@ class PostProcess:
             self.char_vocab = char_vocab
             self.char_vectors = char_vectors
             self.l_crops, self.l_diseases, self.l_medicines = lexi
-            self.l_crops, self.l_diseases, self.l_medicines = list(self.l_crops.keys()), list(
-                self.l_diseases.keys()), list(self.l_medicines.keys())
+            self.l_crops, self.l_diseases, self.l_medicines = sorted(list(self.l_crops.keys()), key=lambda x: len(x), reverse=True), \
+                                                              sorted(list(self.l_diseases.keys()), key=lambda x: len(x), reverse=True), \
+                                                              sorted(list(self.l_medicines.keys()), key=lambda x: len(x), reverse=True)
             self.lv_corps = self._build_phrase_vectors(self.l_crops)
             self.lv_diseases = self._build_phrase_vectors(self.l_diseases)
             self.lv_medicines = self._build_phrase_vectors(self.l_medicines)
 
             self.lexi_result = self._get_result_from_lexi(test)
+            # pd.DataFrame([ids, self.lexi_result[0], self.lexi_result[1], self.lexi_result[2]]).T. \
+            #     to_csv('./l_result.csv', header=['id', 'n_crop', 'n_disease', 'n_medicine'], index=False)
             # print(1)
 
     def _get_result_from_lexi(self, test: list) -> Tuple:
@@ -687,34 +694,25 @@ class PostProcess:
         te_crops = []
         te_diseases = []
         te_medicines = []
-
-        for t in test:
-            t_crops = []
-            for crop in self.l_crops:
-                index = find_all(t, crop)
-                if isinstance(index, int):
+        def _get_item(sequence: str, lexi_item: list) -> Tuple:
+            entitys = []
+            for entity in lexi_item:
+                c_index = find_all(sequence, entity)
+                if c_index == -1:
                     continue
-                for item in index:
-                    t_crops.append(t[item:item + len(crop)])
-            te_crops.append(t_crops)
+                else:
+                    for index in c_index:
+                        entitys.append(sequence[index: index + len(entity)])
+                    sequence = sequence.replace(entity, ',')
+            return entitys, sequence
 
-            t_diseases = []
-            for disease in self.l_diseases:
-                index = find_all(t, disease)
-                if isinstance(index, int):
-                    continue
-                for item in index:
-                    t_diseases.append(t[item:item + len(disease)])
-            te_diseases.append(t_diseases)
-
-            t_medicines = []
-            for medicine in self.l_medicines:
-                index = find_all(t, medicine)
-                if isinstance(index, int):
-                    continue
-                for item in index:
-                    t_medicines.append(t[item:item + len(medicine)])
-            te_medicines.append(t_medicines)
+        for sequence in test:
+            entitys, sequence = _get_item(sequence, self.l_crops)
+            te_crops.append(entitys)
+            entitys, sequence = _get_item(sequence, self.l_medicines)
+            te_medicines.append(entitys)
+            entitys, sequence = _get_item(sequence, self.l_diseases)
+            te_diseases.append(entitys)
 
         return te_crops, te_diseases, te_medicines
 
@@ -787,9 +785,16 @@ class PostProcess:
             pass
         return entitys
 
+    def _merge_entity(self, entitys: list, lexi_result: list):
+        for index, item in enumerate(entitys):
+            if len(item) < len(lexi_result[index]):
+                entitys[index] = list(set(item + lexi_result[index]))
+        return entitys
+
     def forward(self, entitys: list, index: int) -> list:
         entitys = self._delete_symbol(entitys)
         # entitys = self._correct_error(entitys, index)
+        # entitys = self._merge_entity(entitys, self.lexi_result[index])
         return entitys
 
     def __call__(self, *args, **kwargs):
@@ -969,7 +974,7 @@ if __name__ == '__main__':
     train_char_labels = train_char_labels[:TRAIN_LENGTH]
     train_char_ids = train_char_ids[:TRAIN_LENGTH]
 
-    post_process = PostProcess(lexi, test_seqs, word_vocab, word_vector.copy(), vocab, vectors.copy(), pre_train)
+    post_process = PostProcess(lexi, test_seqs, word_vocab, word_vector.copy(), vocab, vectors.copy(), pre_train, test[:, 0])
     pre_model = torch.from_numpy(vectors) if pre_train else None
     OUTPUT_SIZE = len(category_dict)
     INPUT_SIZE = len(vocab)
@@ -1035,7 +1040,7 @@ if __name__ == '__main__':
             output = model(data, lengths)
             pred = model.get_word_id(output)
             valid_loss = model.caculate_loss(output, label, category_dict, criterion)
-            p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict, post_process=post_process),
+            p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, valid_seqs, category_dict),
                                      true_labels=np.array(train)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1], 1:])
 
             if best_score <= f_acc:
@@ -1055,7 +1060,7 @@ if __name__ == '__main__':
         data, label = data.to(DEVICE), label.to(DEVICE)
         output = model(data, lengths)
         pred = model.get_word_id(output)
-        p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict, post_process=post_process),
+        p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict),
                                  true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
         print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
         print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
