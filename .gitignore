@@ -3,3 +3,4 @@ datas/
 .idea
 __pycache__/
 week01_embeddings/.data
+other/

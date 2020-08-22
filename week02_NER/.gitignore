@@ -6,3 +6,4 @@ pretrained_model/
 BERT-NER-Pytorch/
 model.pkl
 result.csv
+l_result.csv

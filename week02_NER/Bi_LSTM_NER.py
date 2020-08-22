@@ -41,7 +41,7 @@ def get_params(crf: bool = False) -> Tuple:
 
     # VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA
     config = {
-        0: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
+        0: (128, True, 320, 64, 1e-2, 1, 70, 10, 0.5),
         1: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
     }
     print(1)
@@ -54,12 +54,9 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
     entity = ['n_disease', 'n_crop', 'n_medicine']
     # split data and labels
     def split_raw_data(sequence: str, index: int) -> Tuple:
-        sequence = sequence.replace('，', '，/dj ')
-        sequence = sequence.replace('%', '%/pj ')
-        sequence = sequence.replace('+', '+/aj ')
-        sequence = sequence.replace('＋', '+/aj ')
-        sequence = sequence.replace('·', '·/w ')
-        sequence = sequence.replace('％', '%/pj ')
+        replace_s = ['，', '%', '％', '+', '＋', '·', '：', '、', '；', '?', '—', '！', '。', '（', '）']
+        for s in replace_s:
+            sequence = sequence.replace(s, '{}/p '.format(s))
         raw_arr = sequence.split(' ')
         datas = np.array([i.split('/') for i in raw_arr if i != '' and len(i.split('/')) == 2])
 
@@ -71,13 +68,13 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             if item[0] == '':
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
-        # 623, 2081, 2516
-        if index == 623 + 370:
-            datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2081 + 370:
-            datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        if index == 2516 + 370:
-            datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
+        # # 623, 2081, 2516
+        # if index == 623 + 370:
+        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
+        # if index == 2081 + 370:
+        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
+        # if index == 2516 + 370:
+        #     datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         # keys = datas[:, 1]
         # values = datas[:, 0]
@@ -85,7 +82,7 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
         # true_values = []
         # for item in train[index, 1:]:
         #     true_values = true_values + eval(item)
-        #
+
         # if len(values) == len(true_values):
         #     for i in values:
         #         if i not in true_values:
@@ -886,7 +883,7 @@ def find_all(source: str, dest: str) -> list:
     return dest_list
 
 
-def enhance_data(train_data: np.ndarray) -> np.ndarray:
+def enhance_data(train_data: np.ndarray, lexi) -> np.ndarray:
 
     # diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:80]
     diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病',
@@ -929,13 +926,16 @@ if __name__ == '__main__':
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
-    train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
-    test = pd.read_csv('{}/test/test.csv'.format(DATA_DIR)).values
+    train1 = train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
+    train = pd.read_csv('{}/train/train1.csv'.format(DATA_DIR), index_col=0).values
+
+    train = np.vstack((train1, train))
+    test = pd.read_csv('{}/test/test1.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1]
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
 
     # ======================== enhance data ========================= #
-    enhance_part = enhance_data(train[:len(train) - TEST_LENGTH])
+    enhance_part = enhance_data(train[:len(train) - TEST_LENGTH], build_lexi(train[:, 1:]))
     train = np.vstack((enhance_part, train))
     # ======================== enhance data ========================= #
 
@@ -945,7 +945,7 @@ if __name__ == '__main__':
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
 
     lexi = build_lexi(train[:, 1:])
-    t = lexi[2].get('高效氯氰菊酯')
+    # t = lexi[2].get('高效氯氰菊酯')
     # 日烧病, 叶绿素，氧化亚铜, 除草剂残留, 糖醇硼, 红蜘蛛, 磷酸钾, 氯虫苯甲酰胺, 蚜茧蜂, 肟菌脂，塞菌铜，链霉素
 
     if pre_train:
@@ -956,7 +956,7 @@ if __name__ == '__main__':
         elmo_vectors = scio.loadmat('{}/elmo.mat'.format(DATA_DIR))['vectors']
         wiki_vectors = scio.loadmat('{}/w2v_wiki.mat'.format(DATA_DIR))['vectors']
         wiki_bc_vectors = scio.loadmat('{}/w2v_wiki_bc.mat'.format(DATA_DIR))['vectors']
-        bert_vectors = scio.loadmat('{}/bert.mat'.format(DATA_DIR))['vectors']
+        # bert_vectors = scio.loadmat('{}/bert.mat'.format(DATA_DIR))['vectors']
         vectors = np.hstack((vectors, elmo_vectors[:, :VECTOR_SIZE], wiki_bc_vectors[:, :VECTOR_SIZE]))
         word_vector, word_vocab = build_word(word_datas, VECTOR_SIZE * 3)
         pinyin_vector, pinyin_vocab = build_word_pinyin(word_datas)
@@ -1063,7 +1063,7 @@ if __name__ == '__main__':
         p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict),
                                  true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
         print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
-        print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
+        # print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
         print('tset: f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.format(f_acc, p, r, f))
 
     # work
