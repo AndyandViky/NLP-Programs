@@ -883,12 +883,14 @@ def find_all(source: str, dest: str) -> list:
     return dest_list
 
 
-def enhance_data(train_data: np.ndarray, lexi) -> np.ndarray:
+def enhance_data(train_data: np.ndarray, lexi, test_seqs) -> np.ndarray:
 
     # diseases = sorted(lexi[1], key=lambda x: lexi[1].get(x))[:80]
+    # diseases = ['抗病品种', '潜叶蛾', '地下虫害', '花叶病', '斑潜蝇', '蜗牛危害', '速效性', '斑潜蝇危害', '阔叶杂草', '蔓枯病', '纹裂果', '金龟子', '地下害虫', '积累中毒']
     diseases = ['蚧壳虫', '低温冻害', '烟青虫', '花叶病', '斑潜蝇', '盲蝽象', '夜蛾', '烧根', '气害灼伤', '积累中毒', '少量畸形果', '美洲斑潜蝇', '细菌性叶斑病',
                 '菌核病']
     # medicines = sorted(lexi[2], key=lambda x: lexi[2].get(x))[:80]
+    # medicines = ['敌百虫', '十恶霉灵', '硼钙肥', '草胺', '甲萘威', '乐果', '十烯酰吗啉', '吡丙醚', '复合肥', '十螯合钙', '敌敌畏']
     medicines = ['铜制剂', '虫酰肼', '氟啶脲', '多杀霉素', '虱螨脲', '农用链霉素', '矮壮素', '硼钙元素', '杀虫单', '硝酸钾', '除草剂残留']
 
     def get_relative_index(entity: list) -> list:
@@ -926,7 +928,7 @@ if __name__ == '__main__':
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
-    train1 = train = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
+    train1 = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
     train = pd.read_csv('{}/train/train1.csv'.format(DATA_DIR), index_col=0).values
 
     train = np.vstack((train1, train))
@@ -935,8 +937,8 @@ if __name__ == '__main__':
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
 
     # ======================== enhance data ========================= #
-    enhance_part = enhance_data(train[:len(train) - TEST_LENGTH], build_lexi(train[:, 1:]))
-    train = np.vstack((enhance_part, train))
+    # enhance_part = enhance_data(train[:len(train) - TEST_LENGTH], build_lexi(train[:, 1:]), test_seqs)
+    # train = np.vstack((enhance_part, train))
     # ======================== enhance data ========================= #
 
     word_datas, train_seqs, seq_pros, train_char_labels = get_process_data(train, ENHANCE_DATA)
@@ -945,8 +947,6 @@ if __name__ == '__main__':
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
 
     lexi = build_lexi(train[:, 1:])
-    # t = lexi[2].get('高效氯氰菊酯')
-    # 日烧病, 叶绿素，氧化亚铜, 除草剂残留, 糖醇硼, 红蜘蛛, 磷酸钾, 氯虫苯甲酰胺, 蚜茧蜂, 肟菌脂，塞菌铜，链霉素
 
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
