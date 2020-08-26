@@ -68,12 +68,12 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             if item[0] == '':
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
-        # # 623, 2081, 2516
-        # if index == 623 + 370:
+        # 623, 2081, 2516
+        # if index == 623:
         #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2081 + 370:
+        # if index == 2081:
         #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2516 + 370:
+        # if index == 2516:
         #     datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
 
         # keys = datas[:, 1]
@@ -82,7 +82,7 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
         # true_values = []
         # for item in train[index, 1:]:
         #     true_values = true_values + eval(item)
-
+        #
         # if len(values) == len(true_values):
         #     for i in values:
         #         if i not in true_values:
@@ -115,7 +115,7 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             #         if len(syn_word) > 1: instead_datas[index][0] = syn_word[1]
 
             exchange_datas = datas.copy()
-            for ite in range(3):
+            for ite in range(8):
                 random_index = np.random.randint(0, len(datas), 2)
                 random_index = list(set(random_index))
                 if len(random_index) == 2:
@@ -932,6 +932,7 @@ if __name__ == '__main__':
     train = pd.read_csv('{}/train/train1.csv'.format(DATA_DIR), index_col=0).values
 
     train = np.vstack((train1, train))
+    lexi = build_lexi(train[:, 1:])
     test = pd.read_csv('{}/test/test1.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1]
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
@@ -964,7 +965,7 @@ if __name__ == '__main__':
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 9  # using 10-fold cross validation 5
+    fold_index = 0  # using 10-fold cross validation 0
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
@@ -989,7 +990,7 @@ if __name__ == '__main__':
                            pre_model=pre_model).to(
             DEVICE)
     # init optimization
-    optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99))
+    optim = torch.optim.Adam(model.parameters(), lr=LR, betas=(0.5, 0.99), weight_decay=1e-5)
     lr_s = StepLR(optim, step_size=STEP_SIZE, gamma=GAMMA)
     # init criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
@@ -1012,6 +1013,21 @@ if __name__ == '__main__':
         # training
         model.train()
         train_loss = 0
+        if (epoch + 1) % 5 == 0:
+            fold_index = (fold_index + 1) % 10
+            print('current fold index is: {}'.format(fold_index))
+            (train_dataloader, valid_dataloader) = get_data_loader(
+                root='',
+                data_type_name=[TRAIN, VALID, TEST],
+                batch_size=[BATCH_SIZE, 5000, 5000],
+                fold_index=fold_index,
+                train_length=TRAIN_LENGTH,
+                train_char_labels=train_char_labels,
+                train_char_ids=train_char_ids,
+                test_char_ids=test_char_ids,
+                test=False,
+            )
+            valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
         for index, batch in enumerate(train_dataloader):
 
             data, lengths = tensorized(batch[:, 0], vocab)
