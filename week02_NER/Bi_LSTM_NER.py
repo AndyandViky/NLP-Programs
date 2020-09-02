@@ -42,7 +42,7 @@ def get_params(crf: bool = False) -> Tuple:
     # VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA
     config = {
         0: (128, True, 320, 64, 1e-2, 1, 70, 10, 0.5),
-        1: (128, True, 320, 64, 1e-2, 1, 30, 10, 0.1),
+        1: (128, True, 128, 64, 1e-3, 1, 30, 10, 0.9),
     }
     print(1)
     return config[int(crf)]
@@ -704,12 +704,14 @@ class PostProcess:
             return entitys, sequence
 
         for sequence in test:
-            entitys, sequence = _get_item(sequence, self.l_crops)
-            te_crops.append(entitys)
             entitys, sequence = _get_item(sequence, self.l_medicines)
+            if '芸苔素' in entitys:
+                entitys.remove('芸苔素')
             te_medicines.append(entitys)
             entitys, sequence = _get_item(sequence, self.l_diseases)
             te_diseases.append(entitys)
+            entitys, sequence = _get_item(sequence, self.l_crops)
+            te_crops.append(entitys)
 
         return te_crops, te_diseases, te_medicines
 
@@ -923,7 +925,7 @@ if __name__ == '__main__':
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
-    USING_CRF = False
+    USING_CRF = True
     ENHANCE_DATA = True
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
@@ -932,7 +934,6 @@ if __name__ == '__main__':
     train = pd.read_csv('{}/train/train1.csv'.format(DATA_DIR), index_col=0).values
 
     train = np.vstack((train1, train))
-    lexi = build_lexi(train[:, 1:])
     test = pd.read_csv('{}/test/test1.csv'.format(DATA_DIR)).values
     test_seqs = test[:, 1]
     test_seqs = np.array([re.sub(r'[0-9]', '0', sequence) for sequence in test_seqs])
@@ -965,7 +966,7 @@ if __name__ == '__main__':
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 0  # using 10-fold cross validation 0
+    fold_index = 9  # using 10-fold cross validation 0
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
@@ -1013,21 +1014,21 @@ if __name__ == '__main__':
         # training
         model.train()
         train_loss = 0
-        if (epoch + 1) % 5 == 0:
-            fold_index = (fold_index + 1) % 10
-            print('current fold index is: {}'.format(fold_index))
-            (train_dataloader, valid_dataloader) = get_data_loader(
-                root='',
-                data_type_name=[TRAIN, VALID, TEST],
-                batch_size=[BATCH_SIZE, 5000, 5000],
-                fold_index=fold_index,
-                train_length=TRAIN_LENGTH,
-                train_char_labels=train_char_labels,
-                train_char_ids=train_char_ids,
-                test_char_ids=test_char_ids,
-                test=False,
-            )
-            valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
+        # if (epoch + 1) % 5 == 0:
+        #     fold_index = (fold_index + 1) % 10
+        #     print('current fold index is: {}'.format(fold_index))
+        #     (train_dataloader, valid_dataloader) = get_data_loader(
+        #         root='',
+        #         data_type_name=[TRAIN, VALID, TEST],
+        #         batch_size=[BATCH_SIZE, 5000, 5000],
+        #         fold_index=fold_index,
+        #         train_length=TRAIN_LENGTH,
+        #         train_char_labels=train_char_labels,
+        #         train_char_ids=train_char_ids,
+        #         test_char_ids=test_char_ids,
+        #         test=False,
+        #     )
+        #     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
         for index, batch in enumerate(train_dataloader):
 
             data, lengths = tensorized(batch[:, 0], vocab)
