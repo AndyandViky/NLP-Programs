@@ -63,9 +63,7 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
         dele_index = []
         for ind, item in enumerate(datas):
             item[0] = item[0].replace(' ', '')
-            item[0] = item[0].replace('℃', '')
-            item[0] = re.sub(r'[a-zA-Z0-9]', '0', item[0])
-            item[0] = item[0].replace('0', '')
+            item[0] = re.sub(r'[0-9]', '0', item[0])
 
             if item[0] == '':
                 dele_index.append(ind)
