@@ -63,7 +63,9 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
         dele_index = []
         for ind, item in enumerate(datas):
             item[0] = item[0].replace(' ', '')
-            item[0] = re.sub(r'[0-9]', '0', item[0])
+            item[0] = item[0].replace('℃', '')
+            item[0] = re.sub(r'[a-zA-Z0-9]', '0', item[0])
+            item[0] = item[0].replace('0', '')
 
             if item[0] == '':
                 dele_index.append(ind)
@@ -226,7 +228,7 @@ class AnswerData(Dataset):
         super(AnswerData, self).__init__()
 
         self.root = root
-        self.train = train
+        # self.train = train
         self.fold_index = fold_index
         self.train_length = train_length
         self.train_char_ids = train_char_ids
