@@ -926,7 +926,7 @@ if __name__ == '__main__':
     VALID = 'VALID'
     TEST = 'TEST'
     USING_CRF = True
-    ENHANCE_DATA = True
+    ENHANCE_DATA = False
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
@@ -944,12 +944,13 @@ if __name__ == '__main__':
     # ======================== enhance data ========================= #
 
     word_datas, train_seqs, seq_pros, train_char_labels = get_process_data(train, ENHANCE_DATA)
+    # scio.savemat('train_seqs.mat', {'data': train_seqs, 'labels': train[:, 1:]})
     if ENHANCE_DATA: train = np.repeat(train, 2, axis=0)
     TRAIN_LENGTH = len(train_seqs) - TEST_LENGTH
     vocab, token, vectors, r_vocab = build_corpus(test_seqs, train_seqs, pre_train, VECTOR_SIZE)
 
     lexi = build_lexi(train[:, 1:])
-
+    # scio.savemat('./lexi.mat', {'data': [list(lexi[0].keys()), list(lexi[1].keys()), list(lexi[2].keys())]})
     if pre_train:
         # wiki_vectors = get_wiki_vectors(list(vocab.keys()))
         # wiki_bc_vectors = get_elmo_vector(list(vocab.keys()))
