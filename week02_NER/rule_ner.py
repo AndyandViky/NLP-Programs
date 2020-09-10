@@ -35,10 +35,10 @@ train1 = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
 train = pd.read_csv('{}/train/train1.csv'.format(DATA_DIR), index_col=0).values
 
 train = np.vstack((train1, train))
-true_value = train[:, 1:]
+true_value = train[:, 1:][-500:]
 train = scio.loadmat('./train_seqs.mat')
 train_seqs = train['data'][0]
-train_seqs = train_seqs
+train_seqs = train_seqs[-500:]
 train_seqs = np.array([re.sub(r'[a-zA-Z0-9]', '0', sequence[0]) for sequence in train_seqs])
 
 
@@ -77,7 +77,7 @@ jieba_cut()
 
 
 def large_match():
-    # jieba.load_userdict(crop + diseases + medicines)
+    jieba.load_userdict(crop + diseases + medicines)
     def _build_large_dict(entitys: list) -> dict:
 
         result = dict()
@@ -135,11 +135,11 @@ def large_match():
                         s = sequence[index: index + l]
                         if s in entitys_lexi and _judge_complete(jieba.lcut(sequence), s, index):
                             entitys.append(s)
-                            remove_list.append(s)
+                            # remove_list.append(replace)
                             break
-                remove_list = list(set(remove_list))
-                for j in remove_list:
-                    sequence = sequence.replace(j, ',')
+                # remove_list = list(set(remove_list))
+                # for j in remove_list:
+                #     sequence = sequence.replace(j, ',')
         return entitys, sequence
 
     for sequence in train_seqs:

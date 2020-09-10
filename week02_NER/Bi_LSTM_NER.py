@@ -68,27 +68,6 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             if item[0] == '':
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
-        # 623, 2081, 2516
-        # if index == 623:
-        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2081:
-        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2516:
-        #     datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
-
-        # keys = datas[:, 1]
-        # values = datas[:, 0]
-        # values = np.delete(values, [index for index, k in enumerate(keys) if k not in entity])
-        # true_values = []
-        # for item in train[index, 1:]:
-        #     true_values = true_values + eval(item)
-        #
-        # if len(values) == len(true_values):
-        #     for i in values:
-        #         if i not in true_values:
-        #             print(1)
-        # else:
-        #     print(1)
 
         def extra_info(data: np.ndarray) -> Tuple:
             char_labels = []
@@ -439,16 +418,6 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         break
                     else:
                         break
-                        # 扩展一位，尽可能纠错
-                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        #     seq = seq + seq_item[k + 1]
-                        #     last_index = k + 1
-                        #     break
-                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        # else:
-                        #     break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -925,8 +894,8 @@ if __name__ == '__main__':
     TRAIN = 'TRAIN'
     VALID = 'VALID'
     TEST = 'TEST'
-    USING_CRF = True
-    ENHANCE_DATA = False
+    USING_CRF = False
+    ENHANCE_DATA = True
     TEST_LENGTH = 500
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
