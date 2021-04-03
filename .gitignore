@@ -2,5 +2,5 @@ datas/
 .DS_Store
 .idea
 __pycache__/
-week01_embeddings/.data
+01_embeddings/.data
 other/
