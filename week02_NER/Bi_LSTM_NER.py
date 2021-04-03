@@ -68,27 +68,6 @@ def get_process_data(train: list, enhance_data: str) -> Tuple:
             if item[0] == '':
                 dele_index.append(ind)
         datas = np.delete(datas, dele_index, axis=0)
-        # 623, 2081, 2516
-        # if index == 623:
-        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2081:
-        #     datas[26][0] = re.sub(u'[0-9]', '', datas[26][0])
-        # if index == 2516:
-        #     datas[1][0] = re.sub(u'[0-9]', '', datas[1][0])
-
-        # keys = datas[:, 1]
-        # values = datas[:, 0]
-        # values = np.delete(values, [index for index, k in enumerate(keys) if k not in entity])
-        # true_values = []
-        # for item in train[index, 1:]:
-        #     true_values = true_values + eval(item)
-        #
-        # if len(values) == len(true_values):
-        #     for i in values:
-        #         if i not in true_values:
-        #             print(1)
-        # else:
-        #     print(1)
 
         def extra_info(data: np.ndarray) -> Tuple:
             char_labels = []
@@ -381,10 +360,11 @@ class BiLSTM_CRF(nn.Module):
         )
         self.out = nn.Linear(hidden_dim * 2, output_dim)
         self.crf = CRF(output_dim, batch_first=True)
+        self.dropout = nn.Dropout(0.3)
 
     def forward(self, x: Tensor, lengths: list) -> Tensor:
 
-        embeded = self.embedding(x)
+        embeded = self.dropout(self.embedding(x))
         packed = pack_padded_sequence(embeded, lengths, batch_first=True, enforce_sorted=False)
         output, hidden = self.rnn(packed)
         output, hidden = pad_packed_sequence(output, batch_first=True)
@@ -439,16 +419,6 @@ def drop_entity(pred: np.ndarray, test_seqs: list, category_dict: dict, post_pro
                         break
                     else:
                         break
-                        # 扩展一位，尽可能纠错
-                        # if item[k + 1] == e_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        #     seq = seq + seq_item[k + 1]
-                        #     last_index = k + 1
-                        #     break
-                        # elif item[k + 1] == i_e and k + 1 < len(seq_item):
-                        #     seq = seq + seq_item[k]
-                        # else:
-                        #     break
             if item[last_index] == e_e:
                 result.append(seq)
         return result
@@ -926,8 +896,8 @@ if __name__ == '__main__':
     VALID = 'VALID'
     TEST = 'TEST'
     USING_CRF = True
-    ENHANCE_DATA = False
-    TEST_LENGTH = 500
+    ENHANCE_DATA = True
+    TEST_LENGTH = 0
     VECTOR_SIZE, pre_train, HIDDEN_DIM, BATCH_SIZE, LR, NUM_LAYERS, EPOCH, STEP_SIZE, GAMMA = get_params(USING_CRF)
 
     train1 = pd.read_csv('{}/train/train.csv'.format(DATA_DIR), index_col=0).values
@@ -967,7 +937,7 @@ if __name__ == '__main__':
         vectors = add_lexi_infomation(lexi_dict, vocab, vectors.copy())
         VECTOR_SIZE = vectors.shape[1]
 
-    fold_index = 9  # using 10-fold cross validation 0
+    fold_index = 8  # using 10-fold cross validation 0
     valid_seqs = np.array(train_seqs)[get_10_fold_index(fold_index, TRAIN_LENGTH)[1]]
 
     train_char_ids, train_char_labels, test_char_ids, category_dict = seq2id(token, vocab, train_char_labels)
@@ -1071,18 +1041,18 @@ if __name__ == '__main__':
     torch.save(best_model, './model.pkl')
     model.load_state_dict(torch.load('./model.pkl', map_location=DEVICE))
     # testing
-    model.eval()
-    with torch.no_grad():
-        data, lengths = tensorized(test_l_ids, vocab)
-        label, _ = tensorized(test_l_labels, category_dict)
-        data, label = data.to(DEVICE), label.to(DEVICE)
-        output = model(data, lengths)
-        pred = model.get_word_id(output)
-        p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict),
-                                 true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
-        print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
-        # print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
-        print('tset: f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.format(f_acc, p, r, f))
+    # model.eval()
+    # with torch.no_grad():
+    #     data, lengths = tensorized(test_l_ids, vocab)
+    #     label, _ = tensorized(test_l_labels, category_dict)
+    #     data, label = data.to(DEVICE), label.to(DEVICE)
+    #     output = model(data, lengths)
+    #     pred = model.get_word_id(output)
+    #     p, r, f, f_acc = caculate_f_acc(*drop_entity(pred, train_seqs[TRAIN_LENGTH:], category_dict),
+    #                              true_labels=np.array(train)[TRAIN_LENGTH:, 1:])
+    #     print(confusion_matrix(label.view(-1).data.cpu().numpy(), pred.reshape(-1)))
+    #     # print(classification_report(label.view(-1).data.cpu().numpy(), pred.reshape(-1), target_names=list(category_dict.keys())[:11]))
+    #     print('tset: f_acc: {:.3f}, precision: {:.3f}, recall: {:.3f}, f1_score: {:.3f}'.format(f_acc, p, r, f))
 
     # work
     model.eval()
