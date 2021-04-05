@@ -91,8 +91,8 @@ class MyData(Dataset):
 
     def process(self, datas: np.ndarray) -> np.ndarray:
 
-        # datas[:, 0][:100] = [self.tokenizer.tokenize(i) for i in datas[:, 0][:100]]
-        # datas[:, 1][:100] = [self.tokenizer.tokenize(i) for i in datas[:, 1][:100]]
+        # datas[:, 0][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:100]]
+        # datas[:, 1][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:100]]
         #
         # return datas[:100]
 
@@ -105,7 +105,9 @@ class MyData(Dataset):
 
         data = self.datas[index]
         label = data[2]
-        data = self.tokenizer.convert_tokens_to_ids((['[CLS]'] + data[0] + ['[SEP]'] + data[1])[:512])
+        data = self.tokenizer.convert_tokens_to_ids(
+            (['[CLS]'] + data[0][:255] + ['[SEP]'] + data[1][:(510 - len(data[0][:255]))])
+        )
         if self.transform:
             data = self.transform(data)
 

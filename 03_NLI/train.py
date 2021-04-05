@@ -7,6 +7,8 @@
 @File: train.py
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
+后续需要嵌入的技术：大batch，FocalLoss, 模型融合.
+具体需要进一步改进的点：原始数据上，模型上，需要进一步阅读论文寻找trick。
 """
 import torch
 import torch.nn as nn
@@ -15,21 +17,22 @@ import pandas as pd
 
 from pytorch_pretrained_bert import BertAdam
 from dataset import get_dataloader
-from config import DEVICE
+from config import DEVICE, Args
 from utils import tensorized
 from model import Bert, Classifier
 from sklearn.metrics import accuracy_score as ACC, precision_score as P, recall_score as R, f1_score as F1
 
 
-train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(batch_size=8)
+train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(batch_size=Args.mini_batch_size.value)
 xe_loss = nn.CrossEntropyLoss().to(DEVICE)
 
 model = nn.DataParallel(Bert().to(DEVICE))
 classifier = nn.DataParallel(Classifier(xe_loss).to(DEVICE))
-optim = BertAdam(model.parameters(), lr=1e-5)
-c_optim = torch.optim.Adam(classifier.parameters(), lr=1e-3)
+optim = BertAdam(model.parameters(), lr=Args.bert_lr.value)
+c_optim = torch.optim.Adam(classifier.parameters(), lr=Args.c_lr.value)
+accumulation_steps = Args.accumulation_steps.value
 
-for epoch in range(10):
+for epoch in range(5):
     model.train()
     classifier.train()
     total_loss = 0
@@ -40,13 +43,21 @@ for epoch in range(10):
         data, mask = data.to(DEVICE), mask.to(DEVICE)
         output = model(data, mask)
         logit, loss = classifier(output, label)
-
         loss = loss.mean()
+
         optim.zero_grad()
         c_optim.zero_grad()
         loss.backward()
         optim.step()
         c_optim.step()
+
+        # loss = loss.mean() / accumulation_steps
+        # loss.backward()
+        # if (i + 1) % accumulation_steps == 0:
+        #     optim.step()
+        #     c_optim.step()
+        #     optim.zero_grad()
+        #     c_optim.zero_grad()
 
         total_loss += loss.item()
 
@@ -75,23 +86,26 @@ for epoch in range(10):
     pre = P(preds, labels)
     rec = R(preds, labels)
     f1 = F1(preds, labels)
+    print('acc:{:.4f}, precision:{:.4f}, recall:{:.4f}, f1:{:.4f}, train_loss:{:.4f}, valid_loss:{:.4f}'.format(
+        acc, pre, rec, f1, total_loss / len(train_dataloader), valid_loss / len(valid_dataloader))
+    )
 
-    print(acc, pre, rec, f1)
+    model.eval()
+    classifier.eval()
+    with torch.no_grad():
+        preds, ids = [], []
+        for i, batch in enumerate(test_dataloader):
+            data, mask = tensorized(batch[:, 0], vocab)
+            id = np.array(list(batch[:, 1]))
+            data, mask = data.to(DEVICE), mask.to(DEVICE)
+            output = model(data, mask)
+            logit, loss = classifier(output)
+            pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
 
-model.eval()
-classifier.eval()
-with torch.no_grad():
-    preds, ids = [], []
-    for i, batch in enumerate(test_dataloader):
-        data, mask = tensorized(batch[:, 0], vocab)
-        id = np.array(list(batch[:, 1]))
-        data, mask = data.to(DEVICE), mask.to(DEVICE)
-        output = model(data, mask)
-        logit, loss = classifier(output)
-        pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
+            preds = np.concatenate((preds, pred))
+            ids = np.concatenate((ids, id))
 
-        preds = np.concatenate((preds, pred))
-        ids = np.concatenate((ids, id))
-
-    preds = preds.astype(np.int)
-    pd.DataFrame(np.vstack((ids, preds)).T).to_csv('./result.csv', index=False, header=['id', 'label'])
+        preds = preds.astype(np.int)
+        pd.DataFrame(np.vstack((ids, preds)).T).to_csv(
+            './result_{}.csv'.format(epoch), index=False, header=['id', 'label']
+        )

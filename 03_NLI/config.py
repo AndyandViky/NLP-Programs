@@ -23,7 +23,20 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 Stopwords = load_stopwords_from_file(DATA_DIR + 'stop_words.txt')
 
 
+class Args(Enum):
+
+    mini_batch_size = 8
+    batch_size = 256
+    bert_lr = 1e-5
+    c_lr = 1e-3
+    accumulation_steps = batch_size // mini_batch_size
+
+    alpha = 1
+    gamma = 2
+
+
 class DataType(Enum):
+
     train = 0
     valid = 1
     test = 2

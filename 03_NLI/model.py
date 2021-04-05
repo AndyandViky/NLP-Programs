@@ -10,6 +10,7 @@
 """
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 
 from typing import Tuple
 from torch import Tensor
@@ -34,6 +35,7 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.xe_loss = xe_loss
+        # 分类器可尝试将512个全部压缩到1
         self.model = nn.Sequential(
             nn.Linear(768, 256),
             nn.Dropout(0.3),
@@ -47,3 +49,24 @@ class Classifier(nn.Module):
         if label is not None:
             loss = self.xe_loss(output, label)
         return output, loss
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha: int = 1,
+                 gamma: int = 2,
+                 reduce: bool = True):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduce = reduce
+
+    def forward(self, inputs, targets):
+
+        BCE_loss = F.cross_entropy(inputs, targets, reduce=False)
+        pt = torch.exp(-BCE_loss)
+        F_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
+
+        if self.reduce:
+            return torch.mean(F_loss)
+        else:
+            return F_loss
