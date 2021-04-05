@@ -47,11 +47,9 @@ class DataUtils:
             for j in ['长', '长']:
                 for p in ['A', 'B']:
                     train = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/train.txt')
-                    test = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/test_with_id.txt')
                     dev = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/valid.txt')
                     train_df = pd.concat([train, train_df], axis=0, ignore_index=True)
                     valid_df = pd.concat([dev, valid_df], axis=0, ignore_index=True)
-                    test_df = pd.concat([test, test_df], axis=0, ignore_index=True)
 
         train_df['labelA'] = train_df['labelA'].fillna(0).astype(int)
         train_df['labelB'] = train_df['labelB'].fillna(0).astype(int)
@@ -67,6 +65,11 @@ class DataUtils:
 
         train_data = train_df[['source', 'target', 'label']].values
         valid_data = valid_df[['source', 'target', 'label']].values
+
+        test_file = ['短短匹配A类', '短长匹配A类', '长长匹配A类', '长长匹配B类', '短长匹配B类', '短短匹配B类']
+        for f in test_file:
+            test = self.prejson(DATA_DIR + f + '/test_with_id.txt')
+            test_df = pd.concat([test_df, test], axis=0, ignore_index=True)
         test_data = test_df[['source', 'target', 'id']].values
 
         return train_data, valid_data, test_data
@@ -74,15 +77,19 @@ class DataUtils:
 
 class MyData(Dataset):
 
-    def __init__(self, datas: np.ndarray, transform: transforms.Compose = None):
+    def __init__(self, datas: np.ndarray, tokenizer: BertTokenizer, transform: transforms.Compose = None):
         super(MyData, self).__init__()
 
+        self.tokenizer = tokenizer
         self.transform = transform
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-chinese', do_basic_tokenize=True)
-        self.vocab = self.tokenizer.vocab
         self.datas = self.process(datas)
 
     def process(self, datas: np.ndarray) -> np.ndarray:
+
+        # datas[:, 0][:100] = [self.tokenizer.tokenize(i) for i in datas[:, 0][:100]]
+        # datas[:, 1][:100] = [self.tokenizer.tokenize(i) for i in datas[:, 1][:100]]
+        #
+        # return datas[:100]
 
         datas[:, 0] = [self.tokenizer.tokenize(i) for i in datas[:, 0]]
         datas[:, 1] = [self.tokenizer.tokenize(i) for i in datas[:, 1]]
@@ -105,9 +112,12 @@ class MyData(Dataset):
 
 def get_dataloader(shuffle: bool = True, batch_size: int = 64) -> Tuple:
 
-    def _get_dataloder(datas: np.ndarray, shuffle: bool) -> Tuple:
+    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese', do_basic_tokenize=True)
+    print('loading pretrained token...')
+    vocab = tokenizer.vocab
+    def _get_dataloder(datas: np.ndarray, shuffle: bool) -> DataLoader:
 
-        dataset = MyData(datas)
+        dataset = MyData(datas, tokenizer)
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -115,11 +125,11 @@ def get_dataloader(shuffle: bool = True, batch_size: int = 64) -> Tuple:
             collate_fn=lambda batch: np.array(batch)
         )
 
-        return dataloader, dataset.vocab
+        return dataloader
 
     train, valid, test = DataUtils().process()
     train_dataloader = _get_dataloder(train, shuffle)
     valid_dataloader = _get_dataloder(valid, shuffle)
     test_dataloader = _get_dataloder(test, False)
 
-    return train_dataloader, valid_dataloader, test_dataloader
+    return train_dataloader, valid_dataloader, test_dataloader, vocab

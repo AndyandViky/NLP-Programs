@@ -35,11 +35,15 @@ class Classifier(nn.Module):
 
         self.xe_loss = xe_loss
         self.model = nn.Sequential(
-            nn.Linear(768, 2)
+            nn.Linear(768, 256),
+            nn.Dropout(0.3),
+            nn.Linear(256, 2),
         )
 
-    def forward(self, x: Tensor, label: Tensor) -> Tuple:
+    def forward(self, x: Tensor, label: Tensor = None) -> Tuple:
 
         output = self.model(x)[:, 0]
-        loss = self.xe_loss(output, label)
+        loss = None
+        if label is not None:
+            loss = self.xe_loss(output, label)
         return output, loss
