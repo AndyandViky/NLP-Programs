@@ -9,7 +9,9 @@
 @Desc: utils.py
 """
 import torch
-from typing import Tuple
+import os
+
+from typing import Tuple, List
 
 
 def tensorized(batch: list, map: dict) -> Tuple:
@@ -26,3 +28,19 @@ def tensorized(batch: list, map: dict) -> Tuple:
         mask[index, lengths[index]:] = 0
 
     return batch_tensor, mask
+
+
+def load_stopwords_from_file(stopwords_file: str = None) -> set:
+
+    if stopwords_file is None:
+        return set()
+    if not os.path.exists(stopwords_file):
+        raise ValueError("stopwords_file: {} doesn't not exist".format(stopwords_file))
+
+    stopwords = set()
+    with open(stopwords_file, 'r') as fr:
+        lines = fr.readlines()
+        for line in lines:
+            word = line.strip()
+            stopwords.add(word)
+    return stopwords

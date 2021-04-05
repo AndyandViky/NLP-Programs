@@ -17,7 +17,7 @@ from torchvision import transforms
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple
-from config import DATA_DIR, DataType
+from config import DATA_DIR, DataType, Stopwords
 from pytorch_pretrained_bert import BertTokenizer
 
 
@@ -84,6 +84,11 @@ class MyData(Dataset):
         self.transform = transform
         self.datas = self.process(datas)
 
+    @staticmethod
+    def delete_stop_word(tokens: List[str]) -> List:
+
+        return [item for item in tokens if item not in Stopwords]
+
     def process(self, datas: np.ndarray) -> np.ndarray:
 
         # datas[:, 0][:100] = [self.tokenizer.tokenize(i) for i in datas[:, 0][:100]]
@@ -91,8 +96,8 @@ class MyData(Dataset):
         #
         # return datas[:100]
 
-        datas[:, 0] = [self.tokenizer.tokenize(i) for i in datas[:, 0]]
-        datas[:, 1] = [self.tokenizer.tokenize(i) for i in datas[:, 1]]
+        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
+        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
 
         return datas
 
