@@ -90,11 +90,11 @@ class MyData(Dataset):
         return [item for item in tokens if item not in Stopwords]
 
     def process(self, datas: np.ndarray) -> np.ndarray:
-
-        # datas[:, 0][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:100]]
-        # datas[:, 1][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:100]]
         #
-        # return datas[:100]
+        # datas[:, 0][:5000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:5000]]
+        # datas[:, 1][:5000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:5000]]
+        #
+        # return datas[:5000]
 
         datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
         datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
@@ -105,6 +105,7 @@ class MyData(Dataset):
 
         data = self.datas[index]
         label = data[2]
+        # 更改token长度
         data = self.tokenizer.convert_tokens_to_ids(
             (['[CLS]'] + data[0][:255] + ['[SEP]'] + data[1][:(510 - len(data[0][:255]))])
         )

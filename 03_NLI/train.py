@@ -8,7 +8,7 @@
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
 后续需要嵌入的技术：大batch，FocalLoss, 模型融合.
-具体需要进一步改进的点：原始数据上，模型上，需要进一步阅读论文寻找trick。
+具体需要进一步改进的点：原始数据上；模型上；将两个任务分开训练；需要进一步阅读论文寻找trick。
 """
 import torch
 import torch.nn as nn
@@ -32,7 +32,7 @@ optim = BertAdam(model.parameters(), lr=Args.bert_lr.value)
 c_optim = torch.optim.Adam(classifier.parameters(), lr=Args.c_lr.value)
 accumulation_steps = Args.accumulation_steps.value
 
-for epoch in range(5):
+for epoch in range(Args.epochs.value):
     model.train()
     classifier.train()
     total_loss = 0
@@ -45,21 +45,15 @@ for epoch in range(5):
         logit, loss = classifier(output, label)
         loss = loss.mean()
 
-        optim.zero_grad()
-        c_optim.zero_grad()
+        loss = loss.mean() / accumulation_steps
         loss.backward()
-        optim.step()
-        c_optim.step()
+        if (i + 1) % accumulation_steps == 0:
+            optim.step()
+            c_optim.step()
+            optim.zero_grad()
+            c_optim.zero_grad()
 
-        # loss = loss.mean() / accumulation_steps
-        # loss.backward()
-        # if (i + 1) % accumulation_steps == 0:
-        #     optim.step()
-        #     c_optim.step()
-        #     optim.zero_grad()
-        #     c_optim.zero_grad()
-
-        total_loss += loss.item()
+        total_loss += loss.item() * accumulation_steps
 
     model.eval()
     classifier.eval()
