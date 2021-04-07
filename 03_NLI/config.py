@@ -25,8 +25,8 @@ Stopwords = load_stopwords_from_file(DATA_DIR + 'stop_words.txt')
 
 class Args(Enum):
 
-    mini_batch_size = 8
-    batch_size = 1024
+    mini_batch_size = 32
+    batch_size = 256
     bert_lr = 1e-5
     c_lr = 1e-3
     epochs = 10

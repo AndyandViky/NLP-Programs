@@ -27,6 +27,7 @@ class Bert(nn.Module):
 
     def forward(self, x: Tensor, attention_mask=None) -> Tensor:
 
+        # 尝试encoder前几层试试
         return self.model(x, attention_mask=attention_mask, output_all_encoded_layers=False)[0]
 
 
@@ -35,11 +36,8 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
 
         self.xe_loss = xe_loss
-        # 分类器可尝试将512个全部压缩到1
         self.model = nn.Sequential(
-            nn.Linear(768, 256),
-            nn.Dropout(0.3),
-            nn.Linear(256, 2),
+            nn.Linear(768, 2),
         )
 
     def forward(self, x: Tensor, label: Tensor = None) -> Tuple:

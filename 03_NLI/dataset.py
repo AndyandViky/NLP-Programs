@@ -44,7 +44,7 @@ class DataUtils:
         valid_df = pd.DataFrame()
         test_df = pd.DataFrame()
         for i in ['长', '短']:
-            for j in ['长', '长']:
+            for j in ['长', '短']:
                 for p in ['A', 'B']:
                     train = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/train.txt')
                     dev = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/valid.txt')
@@ -90,24 +90,27 @@ class MyData(Dataset):
         return [item for item in tokens if item not in Stopwords]
 
     def process(self, datas: np.ndarray) -> np.ndarray:
+
+        # datas[:, 0][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:1000]]
+        # datas[:, 1][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:1000]]
         #
-        # datas[:, 0][:5000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:5000]]
-        # datas[:, 1][:5000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:5000]]
-        #
-        # return datas[:5000]
+        # return datas[:1000]
 
         datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
         datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
 
+        # up-sampling
+        datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 2, axis=0)))
         return datas
 
     def __getitem__(self, index: int) -> Tuple:
 
         data = self.datas[index]
         label = data[2]
-        # 更改token长度
+        # 更改token长度，使用窗口的形式逐段的截取长文本，再拼接形成输入文本。
+        # 修改策略，对不同类型的文本对进行不同的划分。
         data = self.tokenizer.convert_tokens_to_ids(
-            (['[CLS]'] + data[0][:255] + ['[SEP]'] + data[1][:(510 - len(data[0][:255]))])
+            (['[CLS]'] + data[0][:127] + ['[SEP]'] + data[1][:127])
         )
         if self.transform:
             data = self.transform(data)

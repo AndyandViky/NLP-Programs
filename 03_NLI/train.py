@@ -7,8 +7,9 @@
 @File: train.py
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
-后续需要嵌入的技术：大batch，FocalLoss, 模型融合.
-具体需要进一步改进的点：原始数据上；模型上；将两个任务分开训练；需要进一步阅读论文寻找trick。
+后续需要嵌入的技术：FocalLoss, 模型融合.
+具体需要进一步改进的点：原始数据上；模型上；将两个任务分开训练(A使用长128，B使用256)；需要进一步阅读论文寻找trick。
+两个任务联合训练（尝试使用两个分类器，学习各自的参数）
 """
 import torch
 import torch.nn as nn
@@ -57,32 +58,32 @@ for epoch in range(Args.epochs.value):
 
     model.eval()
     classifier.eval()
-    valid_loss = 0
-    preds, labels = [], []
-    for i, batch in enumerate(valid_dataloader):
+    with torch.no_grad():
+        valid_loss = 0
+        preds, labels = [], []
+        for i, batch in enumerate(valid_dataloader):
+            data, mask = tensorized(batch[:, 0], vocab)
+            label = torch.tensor(list(batch[:, 1])).to(DEVICE)
+            data, mask = data.to(DEVICE), mask.to(DEVICE)
+            output = model(data, mask)
+            logit, loss = classifier(output, label)
+            pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
+            label = label.data.cpu().numpy()
 
-        data, mask = tensorized(batch[:, 0], vocab)
-        label = torch.tensor(list(batch[:, 1])).to(DEVICE)
-        data, mask = data.to(DEVICE), mask.to(DEVICE)
-        output = model(data, mask)
-        logit, loss = classifier(output, label)
-        pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
-        label = label.data.cpu().numpy()
+            preds = np.concatenate((pred, preds))
+            labels = np.concatenate((label, labels))
+            loss = loss.mean()
 
-        preds = np.concatenate((pred, preds))
-        labels = np.concatenate((label, labels))
-        loss = loss.mean()
+            valid_loss += loss.item()
 
-        valid_loss += loss.item()
-
-    print(len(preds[preds == 1]), len(labels[labels == 1]))
-    acc = ACC(preds, labels)
-    pre = P(preds, labels)
-    rec = R(preds, labels)
-    f1 = F1(preds, labels)
-    print('acc:{:.4f}, precision:{:.4f}, recall:{:.4f}, f1:{:.4f}, train_loss:{:.4f}, valid_loss:{:.4f}'.format(
-        acc, pre, rec, f1, total_loss / len(train_dataloader), valid_loss / len(valid_dataloader))
-    )
+        print(len(preds[preds == 1]), len(labels[labels == 1]))
+        acc = ACC(preds, labels)
+        pre = P(preds, labels)
+        rec = R(preds, labels)
+        f1 = F1(preds, labels)
+        print('acc:{:.4f}, precision:{:.4f}, recall:{:.4f}, f1:{:.4f}, train_loss:{:.4f}, valid_loss:{:.4f}'.format(
+            acc, pre, rec, f1, total_loss / len(train_dataloader), valid_loss / len(valid_dataloader))
+        )
 
     model.eval()
     classifier.eval()
