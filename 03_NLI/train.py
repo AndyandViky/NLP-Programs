@@ -7,9 +7,12 @@
 @File: train.py
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
-后续需要嵌入的技术：FocalLoss, 模型融合.
-具体需要进一步改进的点：原始数据上；模型上；将两个任务分开训练(A使用长128，B使用256)；需要进一步阅读论文寻找trick。
+后续需要嵌入的技术：模型融合.
+具体需要进一步改进的点：原始数据上；模型上；需要进一步阅读论文寻找trick。
 两个任务联合训练（尝试使用两个分类器，学习各自的参数）
+
+A:(29000:10000)
+B:(29000:5000)
 """
 import torch
 import torch.nn as nn
@@ -20,11 +23,15 @@ from pytorch_pretrained_bert import BertAdam
 from dataset import get_dataloader
 from config import DEVICE, Args
 from utils import tensorized
-from model import Bert, Classifier
+from model import Bert, Classifier, FocalLoss
 from sklearn.metrics import accuracy_score as ACC, precision_score as P, recall_score as R, f1_score as F1
 
 
-train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(batch_size=Args.mini_batch_size.value)
+train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(
+    batch_size=Args.mini_batch_size.value,
+    type=Args.type.value
+)
+# xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
 xe_loss = nn.CrossEntropyLoss().to(DEVICE)
 
 model = nn.DataParallel(Bert().to(DEVICE))
@@ -102,5 +109,5 @@ for epoch in range(Args.epochs.value):
 
         preds = preds.astype(np.int)
         pd.DataFrame(np.vstack((ids, preds)).T).to_csv(
-            './result_{}.csv'.format(epoch), index=False, header=['id', 'label']
+            './result_{}_{}.csv'.format(epoch, ''.join(Args.type.value.value)), index=False, header=['id', 'label']
         )

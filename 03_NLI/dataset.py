@@ -38,38 +38,61 @@ class DataUtils:
         data = pd.DataFrame(tmp)
         return data
 
-    def process(self) -> Tuple:
+    def process(self, type: DataType) -> Tuple:
 
         train_df = pd.DataFrame()
         valid_df = pd.DataFrame()
         test_df = pd.DataFrame()
         for i in ['长', '短']:
             for j in ['长', '短']:
-                for p in ['A', 'B']:
+                for p in type.value:
                     train = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/train.txt')
                     dev = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/valid.txt')
                     train_df = pd.concat([train, train_df], axis=0, ignore_index=True)
                     valid_df = pd.concat([dev, valid_df], axis=0, ignore_index=True)
 
-        train_df['labelA'] = train_df['labelA'].fillna(0).astype(int)
-        train_df['labelB'] = train_df['labelB'].fillna(0).astype(int)
+        if type is DataType.A or type is DataType.B:
+            l = 'label' + type.value[0]
+            train_df[l] = train_df[l].fillna(0).astype(int)
 
-        valid_df['labelA'] = valid_df['labelA'].fillna(0).astype(int)
-        valid_df['labelB'] = valid_df['labelB'].fillna(0).astype(int)
+            valid_df[l] = valid_df[l].fillna(0).astype(int)
 
-        train_df['label'] = train_df['labelA'] + train_df['labelB']
-        valid_df['label'] = valid_df['labelA'] + valid_df['labelB']
+            train_df['label'] = train_df[l]
+            valid_df['label'] = valid_df[l]
 
-        train_df.drop(["labelA", "labelB"], axis=1, inplace=True)
-        valid_df.drop(["labelA", "labelB"], axis=1, inplace=True)
+            train_df.drop([l], axis=1, inplace=True)
+            valid_df.drop([l], axis=1, inplace=True)
+
+            test_file = [
+                '短短匹配{}类'.format(type.value[0]),
+                '短长匹配{}类'.format(type.value[0]),
+                '长长匹配{}类'.format(type.value[0])]
+            if type is DataType.B:
+                test_file = test_file[::-1]
+            for f in test_file:
+                test = self.prejson(DATA_DIR + f + '/test_with_id.txt')
+                test_df = pd.concat([test_df, test], axis=0, ignore_index=True)
+
+        else:
+            train_df['labelA'] = train_df['labelA'].fillna(0).astype(int)
+            train_df['labelB'] = train_df['labelB'].fillna(0).astype(int)
+
+            valid_df['labelA'] = valid_df['labelA'].fillna(0).astype(int)
+            valid_df['labelB'] = valid_df['labelB'].fillna(0).astype(int)
+
+            train_df['label'] = train_df['labelA'] + train_df['labelB']
+            valid_df['label'] = valid_df['labelA'] + valid_df['labelB']
+
+            train_df.drop(["labelA", "labelB"], axis=1, inplace=True)
+            valid_df.drop(["labelA", "labelB"], axis=1, inplace=True)
+
+            test_file = ['短短匹配A类', '短长匹配A类', '长长匹配A类', '长长匹配B类', '短长匹配B类', '短短匹配B类']
+            for f in test_file:
+                test = self.prejson(DATA_DIR + f + '/test_with_id.txt')
+                test_df = pd.concat([test_df, test], axis=0, ignore_index=True)
 
         train_data = train_df[['source', 'target', 'label']].values
         valid_data = valid_df[['source', 'target', 'label']].values
-
-        test_file = ['短短匹配A类', '短长匹配A类', '长长匹配A类', '长长匹配B类', '短长匹配B类', '短短匹配B类']
-        for f in test_file:
-            test = self.prejson(DATA_DIR + f + '/test_with_id.txt')
-            test_df = pd.concat([test_df, test], axis=0, ignore_index=True)
         test_data = test_df[['source', 'target', 'id']].values
 
         return train_data, valid_data, test_data
@@ -80,11 +103,13 @@ class MyData(Dataset):
     def __init__(self,
                  datas: np.ndarray,
                  tokenizer: BertTokenizer,
+                 type: DataType,
                  transform: transforms.Compose = None,
                  up_s: bool = False):
         super(MyData, self).__init__()
 
         self.tokenizer = tokenizer
+        self.type = type
         self.transform = transform
         self.datas = self.process(datas, up_s)
 
@@ -147,9 +172,15 @@ class MyData(Dataset):
         data = self.datas[index]
         label = data[2]
         # 对于A类任务，比较宽松，不需要太长的文本；对于B类需要长文本。
-        data = self.tokenizer.convert_tokens_to_ids(
-            self.truncate_sentence(data[0], data[1])
-        )
+        if self.type is DataType.A:
+            data = self.tokenizer.convert_tokens_to_ids(
+                ['[CLS]'] + data[0][:127] + ['[SEP]'] + data[1][:127]
+            )
+        else:
+            data = self.tokenizer.convert_tokens_to_ids(
+                ['[CLS]'] + data[0][:127] + ['[SEP]'] + data[1][:254 - len(data[0][:127])]
+            )
+
         if self.transform:
             data = self.transform(data)
 
@@ -159,14 +190,18 @@ class MyData(Dataset):
         return len(self.datas)
 
 
-def get_dataloader(shuffle: bool = True, batch_size: int = 64) -> Tuple:
+def get_dataloader(
+        type: DataType,
+        shuffle: bool = True,
+        batch_size: int = 64,
+) -> Tuple:
 
     tokenizer = BertTokenizer.from_pretrained('bert-base-chinese', do_basic_tokenize=True)
     print('loading pretrained token...')
     vocab = tokenizer.vocab
     def _get_dataloder(datas: np.ndarray, shuffle: bool, up_s: bool = False) -> DataLoader:
 
-        dataset = MyData(datas, tokenizer, up_s=up_s)
+        dataset = MyData(datas, tokenizer, up_s=up_s, type=type)
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -176,8 +211,8 @@ def get_dataloader(shuffle: bool = True, batch_size: int = 64) -> Tuple:
 
         return dataloader
 
-    train, valid, test = DataUtils().process()
-    train_dataloader = _get_dataloder(train, shuffle, False)
+    train, valid, test = DataUtils().process(type)
+    train_dataloader = _get_dataloder(train, shuffle, True)
     valid_dataloader = _get_dataloder(valid, shuffle)
     test_dataloader = _get_dataloder(test, False)
 
