@@ -19,7 +19,6 @@ DATA_DIR = os.path.join(ROOT_DIR, 'datas/sohu/')
 BERT_DIR = os.path.join(ROOT_DIR, 'datas/bert-base-chinese/')
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 Stopwords = load_stopwords_from_file(DATA_DIR + 'stop_words.txt')
 
 
@@ -32,7 +31,7 @@ class Args(Enum):
     epochs = 10
     accumulation_steps = batch_size // mini_batch_size
 
-    alpha = 1
+    alpha = 0.25
     gamma = 2
 
 
