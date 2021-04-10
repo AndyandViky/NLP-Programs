@@ -25,9 +25,19 @@ class Bert(nn.Module):
 
         self.model = bert.from_pretrained(BERT_DIR)
 
+    def pool(self, x: Tensor, attention_mask=None) -> Tensor:
+
+        if not attention_mask:
+            return torch.mean(x, dim=1)
+
+        return torch.sum(x * attention_mask, dim=1) / torch.sum(attention_mask, dim=1, keepdim=True)
+
     def forward(self, x: Tensor, attention_mask=None) -> Tensor:
 
-        return self.model(x, attention_mask=attention_mask, output_all_encoded_layers=False)[0]
+        return self.pool(
+            self.model(x, attention_mask=attention_mask, output_all_encoded_layers=False)[0],
+            attention_mask,
+        )
 
 
 class Classifier(nn.Module):
@@ -36,12 +46,13 @@ class Classifier(nn.Module):
 
         self.xe_loss = xe_loss
         self.model = nn.Sequential(
-            nn.Linear(768, 2),
+            nn.Linear(768 * 2, 2),
         )
 
-    def forward(self, x: Tensor, label: Tensor = None) -> Tuple:
+    def forward(self, x_a: Tensor, x_b: Tensor, label: Tensor = None) -> Tuple:
 
-        output = self.model(x)[:, 0]
+        x = torch.cat((x_a, x_b), dim=1)
+        output = self.model(x)
         loss = None
         if label is not None:
             loss = self.xe_loss(output, label)

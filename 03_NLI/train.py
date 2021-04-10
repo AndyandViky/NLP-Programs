@@ -46,11 +46,14 @@ for epoch in range(Args.epochs.value):
     total_loss = 0
     for i, batch in enumerate(train_dataloader):
 
-        data, mask = tensorized(batch[:, 0], vocab)
-        label = torch.tensor(list(batch[:, 1])).to(DEVICE)
-        data, mask = data.to(DEVICE), mask.to(DEVICE)
-        output = model(data, mask)
-        logit, loss = classifier(output, label)
+        data_a, mask_a = tensorized(batch[:, 0], vocab)
+        data_b, mask_b = tensorized(batch[:, 1], vocab)
+        label = torch.tensor(list(batch[:, 2])).to(DEVICE)
+        data_a, mask_a = data_a.to(DEVICE), mask_a.to(DEVICE)
+        data_b, mask_b = data_b.to(DEVICE), mask_b.to(DEVICE)
+        output_a = model(data_a, mask_a)
+        output_b = model(data_b, mask_b)
+        logit, loss = classifier(output_a, output_b, label)
         loss = loss.mean()
 
         loss = loss.mean() / accumulation_steps
@@ -69,11 +72,14 @@ for epoch in range(Args.epochs.value):
         valid_loss = 0
         preds, labels = [], []
         for i, batch in enumerate(valid_dataloader):
-            data, mask = tensorized(batch[:, 0], vocab)
-            label = torch.tensor(list(batch[:, 1])).to(DEVICE)
-            data, mask = data.to(DEVICE), mask.to(DEVICE)
-            output = model(data, mask)
-            logit, loss = classifier(output, label)
+            data_a, mask_a = tensorized(batch[:, 0], vocab)
+            data_b, mask_b = tensorized(batch[:, 1], vocab)
+            label = torch.tensor(list(batch[:, 2])).to(DEVICE)
+            data_a, mask_a = data_a.to(DEVICE), mask_a.to(DEVICE)
+            data_b, mask_b = data_b.to(DEVICE), mask_b.to(DEVICE)
+            output_a = model(data_a, mask_a)
+            output_b = model(data_b, mask_b)
+            logit, loss = classifier(output_a, output_b, label)
             pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
             label = label.data.cpu().numpy()
 
@@ -97,11 +103,15 @@ for epoch in range(Args.epochs.value):
     with torch.no_grad():
         preds, ids = [], []
         for i, batch in enumerate(test_dataloader):
-            data, mask = tensorized(batch[:, 0], vocab)
-            id = np.array(list(batch[:, 1]))
-            data, mask = data.to(DEVICE), mask.to(DEVICE)
-            output = model(data, mask)
-            logit, loss = classifier(output)
+            data_a, mask_a = tensorized(batch[:, 0], vocab)
+            data_b, mask_b = tensorized(batch[:, 1], vocab)
+            data_a, mask_a = data_a.to(DEVICE), mask_a.to(DEVICE)
+            data_b, mask_b = data_b.to(DEVICE), mask_b.to(DEVICE)
+            output_a = model(data_a, mask_a)
+            output_b = model(data_b, mask_b)
+            logit, loss = classifier(output_a, output_b)
+
+            id = np.array(list(batch[:, 2]))
             pred = torch.argmax(torch.softmax(logit, dim=1), dim=1).data.cpu().numpy()
 
             preds = np.concatenate((preds, pred))
