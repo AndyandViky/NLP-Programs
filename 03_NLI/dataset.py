@@ -11,7 +11,7 @@
 import json
 import pandas as pd
 import numpy as np
-import torch
+import jieba
 
 from torchvision import transforms
 from torch import Tensor
@@ -19,6 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple
 from config import DATA_DIR, DataType, Stopwords
 from pytorch_pretrained_bert import BertTokenizer
+from gensim.summarization.summarizer import summarize
 
 
 class DataUtils:
@@ -118,6 +119,29 @@ class MyData(Dataset):
 
         return [item for item in tokens if item not in Stopwords]
 
+    @staticmethod
+    def clean(content: str) -> str:
+        content = content.replace('\n', '')  # 删除句子分隔符
+        content = content.replace(' ', '')  # 删除空格
+        return content
+
+    def get_summary(self, s: str) -> str:
+
+        s = s.replace(' ', '')
+
+        if len(s) > 255:
+            word_list = s.split('。')
+            input_content = [' '.join(list(jieba.cut(item))) for item in word_list if item != '']
+            try:
+                if len(input_content) > 1:
+                    summary = self.clean(''.join(summarize('。\n'.join(input_content))))
+                    if summary:
+                        s = summary
+            except:
+                pass
+
+        return s
+
     def process(self, datas: np.ndarray, up_s: bool = False) -> np.ndarray:
 
         # datas[:, 0][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:1000]]
@@ -125,12 +149,12 @@ class MyData(Dataset):
         #
         # return datas[:1000]
 
-        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
-        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
+        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(self.get_summary(i))) for i in datas[:, 0]]
+        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(self.get_summary(i))) for i in datas[:, 1]]
 
         if up_s:
             # up-sampling
-            datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 1, axis=0)))
+            datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 3, axis=0)))
         return datas
 
     def get_sentence_by_window(self, s: List[str], k: int, max_len: int) -> List[str]:
@@ -171,7 +195,7 @@ class MyData(Dataset):
 
         data = self.datas[index]
         label = data[2]
-        # 对于A类任务，比较宽松，不需要太长的文本；对于B类需要长文本。
+        # 不拼接，直接通过bert获取两个embedding再进行分类。
         if self.type is DataType.A:
             data = self.tokenizer.convert_tokens_to_ids(
                 ['[CLS]'] + data[0][:127] + ['[SEP]'] + data[1][:127]
@@ -212,7 +236,7 @@ def get_dataloader(
         return dataloader
 
     train, valid, test = DataUtils().process(type)
-    train_dataloader = _get_dataloder(train, shuffle, True)
+    train_dataloader = _get_dataloder(train, shuffle, False)
     valid_dataloader = _get_dataloder(valid, shuffle)
     test_dataloader = _get_dataloder(test, False)
 

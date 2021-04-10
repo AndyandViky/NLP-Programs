@@ -27,7 +27,6 @@ class Bert(nn.Module):
 
     def forward(self, x: Tensor, attention_mask=None) -> Tensor:
 
-        # 尝试encoder前几层试试
         return self.model(x, attention_mask=attention_mask, output_all_encoded_layers=False)[0]
 
 
