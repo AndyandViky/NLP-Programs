@@ -39,6 +39,6 @@ class Args(Enum):
     accumulation_steps = batch_size // mini_batch_size
     type = DataType.B
 
-    alpha = 0.25
-    gamma = 1
+    alpha = 0.4
+    gamma = 3
 

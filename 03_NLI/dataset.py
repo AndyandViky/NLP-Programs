@@ -144,13 +144,13 @@ class MyData(Dataset):
 
     def process(self, datas: np.ndarray, up_s: bool = False) -> np.ndarray:
 
-        # datas[:, 0][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:1000]]
-        # datas[:, 1][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:1000]]
+        # datas[:, 0][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:100]]
+        # datas[:, 1][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:100]]
         #
-        # return datas[:1000]
+        # return datas[:100]
 
-        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(self.get_summary(i))) for i in datas[:, 0]]
-        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(self.get_summary(i))) for i in datas[:, 1]]
+        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
+        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
 
         if up_s:
             # up-sampling
@@ -195,7 +195,6 @@ class MyData(Dataset):
 
         data = self.datas[index]
         label = data[2]
-        # 不拼接，直接通过bert获取两个embedding再进行分类。
         if self.type is DataType.A:
             data = self.tokenizer.convert_tokens_to_ids(
                 ['[CLS]'] + data[0][:127] + ['[SEP]'] + data[1][:127]
@@ -220,7 +219,7 @@ def get_dataloader(
         batch_size: int = 64,
 ) -> Tuple:
 
-    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese', do_basic_tokenize=True)
+    tokenizer = BertTokenizer.from_pretrained(DATA_DIR, do_basic_tokenize=True)
     print('loading pretrained token...')
     vocab = tokenizer.vocab
     def _get_dataloder(datas: np.ndarray, shuffle: bool, up_s: bool = False) -> DataLoader:
