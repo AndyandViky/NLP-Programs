@@ -27,10 +27,10 @@ class Bert(nn.Module):
 
     def pool(self, x: Tensor, attention_mask=None) -> Tensor:
 
-        if not attention_mask:
+        if attention_mask is None:
             return torch.mean(x, dim=1)
 
-        return torch.sum(x * attention_mask, dim=1) / torch.sum(attention_mask, dim=1, keepdim=True)
+        return torch.sum(x * attention_mask.unsqueeze(2), dim=1) / torch.sum(attention_mask, dim=1, keepdim=True)
 
     def forward(self, x: Tensor, attention_mask=None) -> Tensor:
 

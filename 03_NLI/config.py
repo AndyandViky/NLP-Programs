@@ -31,7 +31,7 @@ class DataType(Enum):
 
 class Args(Enum):
 
-    mini_batch_size = 8
+    mini_batch_size = 12
     batch_size = 256
     bert_lr = 1e-5
     c_lr = 1e-3

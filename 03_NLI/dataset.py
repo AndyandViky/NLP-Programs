@@ -144,18 +144,18 @@ class MyData(Dataset):
 
     def process(self, datas: np.ndarray, up_s: bool = False) -> np.ndarray:
 
-        datas[:, 0][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:1000]]
-        datas[:, 1][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:1000]]
-
-        return datas[:1000]
-
-        # datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
-        # datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
+        # datas[:, 0][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:1000]]
+        # datas[:, 1][:1000] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:1000]]
         #
-        # if up_s:
-        #     # up-sampling
-        #     datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 3, axis=0)))
-        # return datas
+        # return datas[:1000]
+
+        datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
+        datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
+
+        if up_s:
+            # up-sampling
+            datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 3, axis=0)))
+        return datas
 
     def get_sentence_by_window(self, s: List[str], k: int, max_len: int) -> List[str]:
 
@@ -202,10 +202,10 @@ class MyData(Dataset):
             )
         else:
             origin = self.tokenizer.convert_tokens_to_ids(
-                ['[CLS]'] + data[0][:510] + ['[SEP]']
+                ['[CLS]'] + data[0][:256] + ['[SEP]']
             )
             target = self.tokenizer.convert_tokens_to_ids(
-                ['[CLS]'] + data[1][:510] + ['[SEP]']
+                ['[CLS]'] + data[1][:256] + ['[SEP]']
             )
 
         if self.transform:
