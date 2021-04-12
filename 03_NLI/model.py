@@ -15,19 +15,20 @@ import torch.nn.functional as F
 from typing import Tuple
 from torch import Tensor
 from config import BERT_DIR
-from pytorch_pretrained_bert import BertModel as bert
+from transformers import AutoModel as bert
 
 
-class Bert(nn.Module):
+class RoBert(nn.Module):
 
-    def __init__(self):
-        super(Bert, self).__init__()
+    def __init__(self, model_name: str):
+        super(RoBert, self).__init__()
 
-        self.model = bert.from_pretrained(BERT_DIR)
+        self.model = bert.from_pretrained(model_name)
+        print('loading model...')
 
     def forward(self, x: Tensor, attention_mask=None) -> Tensor:
 
-        return self.model(x, attention_mask=attention_mask, output_all_encoded_layers=False)[0]
+        return self.model(x, attention_mask=attention_mask).last_hidden_state
 
 
 class Classifier(nn.Module):

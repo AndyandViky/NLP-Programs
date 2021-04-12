@@ -18,7 +18,7 @@ from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple
 from config import DATA_DIR, DataType, Stopwords
-from pytorch_pretrained_bert import BertTokenizer
+from transformers import AutoTokenizer
 from gensim.summarization.summarizer import summarize
 
 
@@ -103,7 +103,7 @@ class MyData(Dataset):
 
     def __init__(self,
                  datas: np.ndarray,
-                 tokenizer: BertTokenizer,
+                 tokenizer: AutoTokenizer,
                  type: DataType,
                  transform: transforms.Compose = None,
                  up_s: bool = False):
@@ -215,11 +215,12 @@ class MyData(Dataset):
 
 def get_dataloader(
         type: DataType,
+        model_name: str,
         shuffle: bool = True,
         batch_size: int = 64,
 ) -> Tuple:
 
-    tokenizer = BertTokenizer.from_pretrained(DATA_DIR, do_basic_tokenize=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, do_basic_tokenize=True)
     print('loading pretrained token...')
     vocab = tokenizer.vocab
     def _get_dataloder(datas: np.ndarray, shuffle: bool, up_s: bool = False) -> DataLoader:

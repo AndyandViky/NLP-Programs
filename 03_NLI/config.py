@@ -16,10 +16,17 @@ from utils import load_stopwords_from_file
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT_DIR, 'datas/sohu/')
-BERT_DIR = os.path.join(ROOT_DIR, 'datas/bert-base-chinese/')
+BERT_DIR = os.path.join(ROOT_DIR, 'datas/roberta-base-chinese/')
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 Stopwords = load_stopwords_from_file(DATA_DIR + 'stop_words.txt')
+
+
+class ModelName(Enum):
+
+    bw = 'hfl/chinese-bert-wwm-ext'
+    ro = 'hfl/chinese-roberta-wwm-ext'
+    er = 'nghuyong/ernie-1.0'
 
 
 class DataType(Enum):
@@ -37,7 +44,8 @@ class Args(Enum):
     c_lr = 1e-3
     epochs = 10
     accumulation_steps = batch_size // mini_batch_size
-    type = DataType.B
+    type = DataType.A
+    model = ModelName.er.value
 
     alpha = 0.4
     gamma = 3

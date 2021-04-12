@@ -23,18 +23,19 @@ from pytorch_pretrained_bert import BertAdam
 from dataset import get_dataloader
 from config import DEVICE, Args
 from utils import tensorized
-from model import Bert, Classifier, FocalLoss
+from model import RoBert, Classifier, FocalLoss
 from sklearn.metrics import accuracy_score as ACC, precision_score as P, recall_score as R, f1_score as F1
 
 
 train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(
+    model_name=Args.model.value,
     batch_size=Args.mini_batch_size.value,
     type=Args.type.value
 )
-xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
-# xe_loss = nn.CrossEntropyLoss().to(DEVICE)
+# xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
+xe_loss = nn.CrossEntropyLoss().to(DEVICE)
 
-model = nn.DataParallel(Bert().to(DEVICE))
+model = nn.DataParallel(RoBert(model_name=Args.model.value,).to(DEVICE))
 classifier = nn.DataParallel(Classifier(xe_loss).to(DEVICE))
 optim = BertAdam(model.parameters(), lr=Args.bert_lr.value)
 c_optim = torch.optim.Adam(classifier.parameters(), lr=Args.c_lr.value)
