@@ -48,8 +48,9 @@ class DataUtils:
             for j in ['长', '短']:
                 for p in type.value:
                     train = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/train.txt')
+                    train1 = self.prejson(DATA_DIR + 'round2/' + i + j + '匹配' + p + '类.txt')
                     dev = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/valid.txt')
-                    train_df = pd.concat([train, train_df], axis=0, ignore_index=True)
+                    train_df = pd.concat([train, train1, train_df], axis=0, ignore_index=True)
                     valid_df = pd.concat([dev, valid_df], axis=0, ignore_index=True)
 
         if type is DataType.A or type is DataType.B:
@@ -193,6 +194,8 @@ class MyData(Dataset):
 
     def __getitem__(self, index: int) -> Tuple:
 
+        # 对于长文本，使用主题模型对词进行聚类之后，在每个簇中选取概率最大的词进行组合。
+        # 对于长文本，截断获得embedding，之后加权平均。
         data = self.datas[index]
         label = data[2]
         if self.type is DataType.A:

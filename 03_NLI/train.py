@@ -7,7 +7,6 @@
 @File: train.py
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
-后续需要嵌入的技术：模型融合.
 具体需要进一步改进的点：原始数据上；模型上；需要进一步阅读论文寻找trick。
 两个任务联合训练（尝试使用两个分类器，学习各自的参数）
 
@@ -32,8 +31,8 @@ train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(
     batch_size=Args.mini_batch_size.value,
     type=Args.type.value
 )
-# xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
-xe_loss = nn.CrossEntropyLoss().to(DEVICE)
+xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
+# xe_loss = nn.CrossEntropyLoss().to(DEVICE)
 
 model = nn.DataParallel(RoBert(model_name=Args.model.value,).to(DEVICE))
 classifier = nn.DataParallel(Classifier(xe_loss).to(DEVICE))

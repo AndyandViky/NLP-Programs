@@ -38,15 +38,15 @@ class DataType(Enum):
 
 class Args(Enum):
 
-    mini_batch_size = 32
+    mini_batch_size = 48
     batch_size = 256
     bert_lr = 1e-5
     c_lr = 1e-3
     epochs = 10
     accumulation_steps = batch_size // mini_batch_size
-    type = DataType.A
-    model = ModelName.er.value
+    type = DataType.B
+    model = ModelName.bw.value
 
-    alpha = 0.4
+    alpha = 0.25
     gamma = 3
 
