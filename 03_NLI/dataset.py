@@ -48,8 +48,9 @@ class DataUtils:
             for j in ['长', '短']:
                 for p in type.value:
                     train = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/train.txt')
+                    train1 = self.prejson(DATA_DIR + 'round2/' + i + j + '匹配' + p + '类.txt')
                     dev = self.prejson(DATA_DIR + i + j + '匹配' + p + '类/valid.txt')
-                    train_df = pd.concat([train, train_df], axis=0, ignore_index=True)
+                    train_df = pd.concat([train, train1, train_df], axis=0, ignore_index=True)
                     valid_df = pd.concat([dev, valid_df], axis=0, ignore_index=True)
 
         if type is DataType.A or type is DataType.B:
