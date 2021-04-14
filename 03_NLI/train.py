@@ -30,8 +30,8 @@ train_dataloader, valid_dataloader, test_dataloader, vocab = get_dataloader(
     batch_size=Args.mini_batch_size.value,
     type=Args.type.value
 )
-xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
-# xe_loss = nn.CrossEntropyLoss().to(DEVICE)
+# xe_loss = FocalLoss(Args.alpha.value, Args.gamma.value).to(DEVICE)
+xe_loss = nn.CrossEntropyLoss().to(DEVICE)
 
 model = nn.DataParallel(Bert().to(DEVICE))
 classifier = nn.DataParallel(Classifier(xe_loss).to(DEVICE))

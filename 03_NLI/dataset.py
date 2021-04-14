@@ -147,7 +147,7 @@ class MyData(Dataset):
 
         # datas[:, 0][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:100]]
         # datas[:, 1][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:100]]
-        #
+
         # return datas[:100]
 
         datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
@@ -155,7 +155,9 @@ class MyData(Dataset):
 
         if up_s:
             # up-sampling
-            datas = np.vstack((datas, np.repeat(datas[datas[:, 2] == 1], 3, axis=0)))
+            u = np.repeat(datas[datas[:, 2] == 1], 1, axis=0)
+            u[:, 0], u[:, 1] = u[:, 1], u[:, 0]
+            datas = np.vstack((datas, u))
         return datas
 
     def get_sentence_by_window(self, s: List[str], k: int, max_len: int) -> List[str]:
@@ -236,7 +238,7 @@ def get_dataloader(
         return dataloader
 
     train, valid, test = DataUtils().process(type)
-    train_dataloader = _get_dataloder(train, shuffle, False)
+    train_dataloader = _get_dataloder(train, shuffle, True)
     valid_dataloader = _get_dataloder(valid, shuffle)
     test_dataloader = _get_dataloder(test, False)
 
