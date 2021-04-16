@@ -7,11 +7,6 @@
 @File: train.py
 @Time: 2021/4/3 上午10:23
 @Desc: train.py
-具体需要进一步改进的点：原始数据上；模型上；需要进一步阅读论文寻找trick。
-两个任务联合训练（尝试使用两个分类器，学习各自的参数）
-
-A:(29000:10000)
-B:(29000:5000)
 """
 import torch
 import torch.nn as nn

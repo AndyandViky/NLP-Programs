@@ -145,11 +145,6 @@ class MyData(Dataset):
 
     def process(self, datas: np.ndarray, up_s: bool = False) -> np.ndarray:
 
-        # datas[:, 0][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0][:100]]
-        # datas[:, 1][:100] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1][:100]]
-
-        # return datas[:100]
-
         datas[:, 0] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 0]]
         datas[:, 1] = [self.delete_stop_word(self.tokenizer.tokenize(i)) for i in datas[:, 1]]
 
